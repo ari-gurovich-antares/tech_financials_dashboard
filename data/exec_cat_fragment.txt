@@ -1,0 +1,9 @@
+const EXEC_CATEGORIES = [
+  { cat: "Labor/ T&M", variance: 1761250, hasDrill: true },
+  { cat: "Software", variance: 772434, hasDrill: true },
+  { cat: "MS", variance: 203152, hasDrill: true },
+  { cat: "Infrastructure", variance: -14371, hasDrill: false },
+  { cat: "Hardware", variance: 59289, hasDrill: true },
+  { cat: "OOE", variance: 74411, hasDrill: true },
+  { cat: "FPC", variance: -1353167, hasDrill: true },
+];
