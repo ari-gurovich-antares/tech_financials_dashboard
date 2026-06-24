@@ -22,11 +22,10 @@ function App({ data: initialData }) {
   const [activeTab,  setActiveTab]  = useStateA('overview');
   const [uploadOpen, setUploadOpen] = useStateA(false);
   const [uploadKey,  setUploadKey]  = useStateA(0);
-  const [sourceInfo, setSourceInfo] = useStateA(() => {
-    try { const s = localStorage.getItem('techfin-source-v1'); return s ? JSON.parse(s) : null; } catch { return null; }
-  });
+  const [sourceInfo, setSourceInfo] = useStateA(null);
   const [asOfDate, setAsOfDate] = useStateA(() => {
-    try { return localStorage.getItem('techfin-asof-v1') || 'Jun 22, 2026'; } catch { return 'Jun 22, 2026'; }
+    const now = new Date();
+    return now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
   });
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -44,26 +43,19 @@ function App({ data: initialData }) {
 
   // ── Handle workbook upload — persist, update state, re-mount overview ──
   function handleUpload(filename, parsedData) {
-    try {
-      localStorage.setItem('techfin-data-v1', JSON.stringify(parsedData));
-      const now = new Date();
-      const info = {
-        filename,
-        timestamp: now.toLocaleString('en-US', {
-          month:'short', day:'numeric', year:'numeric',
-          hour:'numeric', minute:'2-digit', hour12:true,
-        }),
-        rowCount:    parsedData.lineItems ? parsedData.lineItems.length : 0,
-        vendorCount: parsedData.vendors   ? parsedData.vendors.length  : 0,
-      };
-      localStorage.setItem('techfin-source-v1', JSON.stringify(info));
-      const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-      localStorage.setItem('techfin-asof-v1', asof);
-      setSourceInfo(info);
-      setAsOfDate(asof);
-    } catch(e) {
-      console.warn('[upload] localStorage write failed:', e.message);
-    }
+    const now = new Date();
+    const info = {
+      filename,
+      timestamp: now.toLocaleString('en-US', {
+        month:'short', day:'numeric', year:'numeric',
+        hour:'numeric', minute:'2-digit', hour12:true,
+      }),
+      rowCount:    parsedData.lineItems ? parsedData.lineItems.length : 0,
+      vendorCount: parsedData.vendors   ? parsedData.vendors.length  : 0,
+    };
+    const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    setSourceInfo(info);
+    setAsOfDate(asof);
     parsedData._bootSource = 'uploaded';
     setData(parsedData);
     setUploadKey(k => k + 1); // re-mount OverviewTab to reset its local filters
@@ -123,7 +115,7 @@ function App({ data: initialData }) {
       {/* ── TOP BAR ───────────────────────────────────────────────────── */}
       <div className="topbar">
         <div className="brand">
-          <img src={(window.__resources && window.__resources.antaresLogo) || 'design-system/antares-primary-white.png'} alt="Antares" />
+          <img src={(window.__resources && window.__resources.antaresLogo) || 'assets/logos/antares-primary-white.png'} alt="Antares" />
         </div>
         <div className="title-block">
           <div className="eyebrow">a n t a r e s &nbsp; c a p i t a l</div>
@@ -235,43 +227,39 @@ function App({ data: initialData }) {
   );
 }
 
-// ── Boot: localStorage → uploaded Excel → JSON fallback ─────────────────
+// ── Boot: latest GitHub workbook → JSON fallback ────────────────────────
 (async function boot() {
   try {
     let data;
 
-    // ── 1. Restore from localStorage (persists uploaded workbooks across reloads)
+    // Clear old per-browser uploads so every visitor sees the latest deployed workbook.
     try {
-      const saved = localStorage.getItem('techfin-data-v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && Array.isArray(parsed.lineItems) && parsed.lineItems.length > 0) {
-          data = parsed;
-          data._bootSource = 'uploaded';
-          console.log('[boot] Restored from localStorage:', parsed.lineItems.length, 'rows');
-        }
+      localStorage.removeItem('techfin-data-v1');
+      localStorage.removeItem('techfin-source-v1');
+      localStorage.removeItem('techfin-asof-v1');
+    } catch(e) {
+      console.warn('[boot] localStorage clear failed:', e.message);
+    }
+
+    // ── 1. Always load the latest workbook from GitHub Pages.
+    try {
+      const baseExcelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
+      const sep = baseExcelUrl.includes('?') ? '&' : '?';
+      const resp = await fetch(baseExcelUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer();
+        data = parseTechFinancialsXlsxFromArrayBuffer(buf);
+        data._bootSource = 'excel';
       }
     } catch(e) {
-      console.warn('[boot] localStorage restore failed:', e.message);
+      console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
     }
 
-    // ── 2. Try uploaded Excel file
+    // ── 2. Fall back to financials.json
     if (!data) {
-      try {
-        const resp = await fetch((window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx');
-        if (resp.ok) {
-          const buf = await resp.arrayBuffer();
-          data = parseTechFinancialsXlsxFromArrayBuffer(buf);
-          data._bootSource = 'excel';
-        }
-      } catch(e) {
-        console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
-      }
-    }
-
-    // ── 3. Fall back to financials.json
-    if (!data) {
-      const resp = await fetch((window.__resources && window.__resources.financialsJson) || 'data/financials.json');
+      const baseJsonUrl = (window.__resources && window.__resources.financialsJson) || 'data/financials.json';
+      const sep = baseJsonUrl.includes('?') ? '&' : '?';
+      const resp = await fetch(baseJsonUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
       data = await resp.json();
       data._bootSource = 'json';
     }
