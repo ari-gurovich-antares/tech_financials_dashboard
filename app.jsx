@@ -218,18 +218,54 @@ function App({ data: initialData }) {
       console.warn('[boot] localStorage clear failed:', e.message);
     }
 
-    // Always load the latest workbook from GitHub Pages with cache busting.
+    // Always load the latest workbook from the GitHub repository, not only
+    // from GitHub Pages. Pages/CDN/browser layers can cache a same-name XLSX
+    // even after Power Automate commits a replacement. The GitHub Contents API
+    // gives us the current file SHA and a fresh download_url for the committed
+    // uploads/new_workbook.xlsx. If that fails, fall back to the Pages path.
     try {
-      const baseExcelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
-      const sep = baseExcelUrl.includes('?') ? '&' : '?';
-      const resp = await fetch(baseExcelUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
-      if (resp.ok) {
-        const buf = await resp.arrayBuffer();
-        data = parseTechFinancialsXlsxFromArrayBuffer(buf);
-        data._bootSource = 'excel';
+      const repoApiUrl = 'https://api.github.com/repos/ari-gurovich-antares/tech_financials_dashboard/contents/uploads/new_workbook.xlsx?ref=main';
+      const metaResp = await fetch(repoApiUrl + '&v=' + Date.now(), {
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/vnd.github+json'
+        }
+      });
+
+      if (metaResp.ok) {
+        const meta = await metaResp.json();
+        const dl = meta.download_url;
+        if (dl) {
+          const dlSep = dl.includes('?') ? '&' : '?';
+          const fileResp = await fetch(dl + dlSep + 'sha=' + encodeURIComponent(meta.sha || Date.now()), { cache: 'no-store' });
+          if (fileResp.ok) {
+            const buf = await fileResp.arrayBuffer();
+            data = parseTechFinancialsXlsxFromArrayBuffer(buf);
+            data._bootSource = 'github-api-excel';
+            data._workbookSha = meta.sha || null;
+          }
+        }
+      } else {
+        console.warn('[boot] GitHub API workbook metadata failed:', metaResp.status, metaResp.statusText);
       }
     } catch(e) {
-      console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
+      console.warn('[boot] GitHub API workbook load failed, trying Pages workbook:', e.message);
+    }
+
+    // Fall back to GitHub Pages workbook with cache busting.
+    if (!data) {
+      try {
+        const baseExcelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
+        const sep = baseExcelUrl.includes('?') ? '&' : '?';
+        const resp = await fetch(baseExcelUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
+        if (resp.ok) {
+          const buf = await resp.arrayBuffer();
+          data = parseTechFinancialsXlsxFromArrayBuffer(buf);
+          data._bootSource = 'pages-excel';
+        }
+      } catch(e) {
+        console.warn('[boot] Pages Excel load failed, using JSON fallback:', e.message);
+      }
     }
 
     // Fall back to financials.json if the workbook cannot be loaded.
