@@ -1,661 +1,298 @@
-// tab-overview-v3.jsx — Executive Overview · Waterfall Experiment
-// Replaces: Executive Bridge + Drivers of Forecast Variance
-// With:     Single category-level waterfall  Budget → [categories] → Forecast
-// All other sections (filters, KPIs, Risk/Opp/Net, drill panels) are preserved.
+// tab-sunburst.jsx — Generic sunburst for Risk / Opp / Net KPI drilldowns
+// Accepts items prop: [{ cat, variance, vendors: [{ name, variance, contracts: [{ name, variance, notes }] }] }]
+// Positive variance = unfavorable (red). Negative = favorable (green).
+const { useState: useStateSB } = React;
 
-const { useState: useStateV3, useMemo: useMemoV3, useRef: useRefV3, useEffect: useEffectV3 } = React;
+const SB_SERIF = "'Source Serif 4', Georgia, serif";
+const SB_SANS  = "'Inter', Arial, sans-serif";
+const SB_NAVY  = '#333C66';
+const SB_RED   = '#B23A3A';
+const SB_GREEN = '#2F7A4D';
 
-const V3T = {
-  navy:   '#333C66',
-  red:    '#B23A3A',
-  green:  '#2F7A4D',
-  stone:  '#807E7A',
-  border: '#ECEAE7',
-  bg:     '#FAFAF8',
-  serif:  "'Source Serif 4', Georgia, serif",
-  sans:   "'Inter', Arial, sans-serif",
+// ── Category-based color system (matches drill-panels palette) ────────
+const SB_CAT_PALETTE = {
+  'Labor/ T&M':    '#6699FF',
+  'Software':      '#EDAC4B',
+  'MS':            '#B088D4',
+  'Infrastructure':'#5DB8A2',
+  'Hardware':      '#E08070',
+  'OOE':           '#C9B54A',
+  'Amortization':  '#80BCDC',
+  'FPC':           '#72C472',
 };
-
-const V3_CATS_ALL  = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'Amortization', 'FPC'];
-const WF_STEP_ORDER = ['Software', 'Labor/ T&M', 'MS', 'Hardware', 'Infrastructure', 'OOE', 'Amortization', 'FPC'];
-
-function v3Cat(li) {
-  if ((li.category || '').toLowerCase() === 'amortization') return 'Amortization';
-  return li.subCategory || '(Other)';
+function _sbH2H(hex){let r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;if(mx===mn)return[0,0,l*100];const d=mx-mn,s=l>.5?d/(2-mx-mn):d/(mx+mn);let h;switch(mx){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}return[h/6*360,s*100,l*100];}
+function _sbH2hex(h,s,l){h/=360;s/=100;l/=100;if(s===0){const v=Math.round(l*255);return'#'+[v,v,v].map(x=>x.toString(16).padStart(2,'0')).join('');}const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q,hr=(t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};return'#'+[h+1/3,h,h-1/3].map(t=>Math.round(hr(t)*255).toString(16).padStart(2,'0')).join('');}
+// depth 0=category(full strength), 1=vendor(lighter), 2=contract(lightest); idx adds subtle per-item variation
+function catColorSB(cat, depth, idx) {
+  const base = SB_CAT_PALETTE[cat] || '#8899BB';
+  const [h,s,l] = _sbH2H(base);
+  return _sbH2hex(h, Math.max(18, s - 13*depth - 2.5*(idx||0)), Math.min(86, l + 15*depth + 3.5*(idx||0)));
+}
+// Diverging color for Net Position: negative=favorable(green), positive=unfavorable(red), t=magnitude
+// depth 0=category(full), 1=vendor/zoomed-vendor(lighter), 2=contract(lightest)
+function netDivColorSB(amount, scale, depth) {
+  const d = depth || 0;
+  const abs = Math.abs(amount);
+  const sc  = Math.max(scale, 1);
+  if (abs < sc * 0.03) return `hsl(0,0%,${50 + d*12}%)`; // < 3% of scale → neutral gray
+  const t   = Math.min(1, abs / sc);
+  const fav = amount < 0;
+  const hue = fav ? 138 : 4;
+  const sat = Math.max(18, (fav ? 42 + t*28 : 48 + t*26) - d*10);
+  const lit = Math.min(82, (fav ? 60 - t*24 : 64 - t*28) + d*13);
+  return `hsl(${hue},${sat}%,${lit}%)`;
 }
 
-// ── Eyebrow (V3-scoped) ──────────────────────────────────────────────────
-function V3Eyebrow({ text, light }) {
+function pt(cx, cy, r, a) {
+  return [cx + r * Math.cos(a - Math.PI / 2), cy + r * Math.sin(a - Math.PI / 2)];
+}
+function arc(cx, cy, r1, r2, a1, a2) {
+  if (Math.abs(a2 - a1) < 0.002) return '';
+  const lg = a2 - a1 > Math.PI ? 1 : 0;
+  const [x1,y1] = pt(cx, cy, r2, a1);
+  const [x2,y2] = pt(cx, cy, r2, a2);
+  const [x3,y3] = pt(cx, cy, r1, a2);
+  const [x4,y4] = pt(cx, cy, r1, a1);
+  return `M${x1.toFixed(2)},${y1.toFixed(2)} A${r2},${r2} 0 ${lg} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L${x3.toFixed(2)},${y3.toFixed(2)} A${r1},${r1} 0 ${lg} 0 ${x4.toFixed(2)},${y4.toFixed(2)}Z`;
+}
+
+// ── Tooltip ────────────────────────────────────────────────────────────
+function SBTooltip({ tip }) {
+  if (!tip) return null;
+  const fav = tip.variance < 0;
   return (
     <div style={{
-      fontFamily: V3T.serif, fontWeight: 800, fontSize: 10,
-      letterSpacing: '0.22em', textTransform: 'lowercase',
-      color: light ? 'rgba(255,255,255,0.52)' : V3T.stone, marginBottom: 10,
-    }}>{text}</div>
-  );
-}
-
-// ── FilterDrop (V3-scoped) ───────────────────────────────────────────────
-function V3FilterDrop({ label, options, value, onChange }) {
-  const [open, setOpen] = useStateV3(false);
-  const ref = useRefV3(null);
-  useEffectV3(() => {
-    if (!open) return;
-    const onDown = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  const active = value.length > 0;
-  const toggle = v => onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v]);
-  return (
-    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
-      <button onClick={() => setOpen(!open)} style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
-        background: active ? V3T.navy : '#fff', border: `1px solid ${active ? V3T.navy : V3T.border}`,
-        color: active ? '#fff' : V3T.stone, cursor: 'pointer',
-        fontFamily: V3T.sans, fontSize: 12, fontWeight: active ? 600 : 500, transition: 'all 0.12s',
-      }}>
-        {active ? `${label} · ${value.length}` : label}
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d={open ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'} />
-        </svg>
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 50,
-          background: '#fff', border: `1px solid ${V3T.border}`,
-          boxShadow: '0 4px 20px rgba(51,60,102,0.14)', minWidth: 220, maxHeight: 300, overflowY: 'auto',
-        }}>
-          {options.map(opt => (
-            <label key={opt} style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px',
-              cursor: 'pointer', background: value.includes(opt) ? '#F4F6FF' : 'transparent',
-            }}>
-              <input type="checkbox" checked={value.includes(opt)} onChange={() => toggle(opt)}
-                style={{ accentColor: V3T.navy, width: 13, height: 13, flexShrink: 0 }} />
-              <span style={{ fontSize: 12, fontFamily: V3T.sans,
-                color: value.includes(opt) ? V3T.navy : '#3C3A36',
-                fontWeight: value.includes(opt) ? 600 : 400 }}>{opt}</span>
-            </label>
-          ))}
-        </div>
-      )}
+      position:'fixed', left:tip.px+14, top:tip.py-10,
+      background:SB_NAVY, color:'#fff', padding:'8px 13px',
+      fontSize:12, lineHeight:1.7, pointerEvents:'none', zIndex:300,
+      boxShadow:'0 4px 16px rgba(0,0,0,0.35)', maxWidth:240,
+      border:'1px solid rgba(255,255,255,0.12)',
+    }}>
+      <div style={{ fontWeight:600, fontSize:13, marginBottom:2 }}>{tip.label}</div>
+      <div style={{ color:fav?'#72D4A0':'#E87878', fontWeight:700, fontVariantNumeric:'tabular-nums', fontSize:14 }}>
+        {fav?'−':'+'}{fmt.m(Math.abs(tip.variance))}
+      </div>
+      <div style={{ color:'rgba(255,255,255,0.6)', fontSize:11, marginTop:1 }}>
+        {tip.pctParent}% of {tip.parentLabel} · {tip.pctTotal}% of total
+      </div>
+      {tip.hint && <div style={{ color:'rgba(255,255,255,0.4)', fontSize:11, fontStyle:'italic' }}>{tip.hint}</div>}
     </div>
   );
 }
 
-// ── Drill hierarchy builder (V3-scoped) ──────────────────────────────────
-function v3BuildDrillHierarchy(lineItems, getAmount) {
-  const byCat = {};
-  for (const li of lineItems) {
-    const amt = getAmount(li);
-    if (Math.abs(amt) < 0.005) continue;
-    const cat    = v3Cat(li);
-    const vendor = li.vendor || '(unspecified)';
-    const appPfx = li.application && li.application !== 'N/A' && li.application.trim() ? li.application + ' — ' : '';
-    const cName  = (appPfx + (li.project || '')).slice(0, 80) || vendor;
-    if (!byCat[cat]) byCat[cat] = {};
-    if (!byCat[cat][vendor]) byCat[cat][vendor] = { total: 0, contracts: [] };
-    byCat[cat][vendor].total += amt;
-    byCat[cat][vendor].contracts.push({ name: cName, amount: amt, notes: li.notes || '' });
-  }
-  const r2 = n => Math.round(n * 100) / 100;
-  const categories = Object.entries(byCat).map(([cat, vendorMap]) => {
-    const vendors = Object.entries(vendorMap).map(([name, data]) => {
-      const vTotal = data.total;
-      const mat    = data.contracts.filter(c => Math.abs(c.amount) >= 100).map(c => ({ ...c, amount: r2(c.amount) }));
-      const resid  = vTotal - mat.reduce((s, c) => s + c.amount, 0);
-      if (Math.abs(resid) >= 0.01) mat.push({ name: 'Other / minor', amount: r2(resid), notes: '' });
-      return { name, amount: r2(vTotal), contracts: mat };
-    }).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-    return { cat, amount: r2(vendors.reduce((s, v) => s + v.amount, 0)), vendors };
-  }).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-  return { total: r2(categories.reduce((s, c) => s + c.amount, 0)), categories };
-}
+// ── Main component ─────────────────────────────────────────────────────
+// Props:
+//   items          – [{ cat, variance, vendors }]  — signed; positive=unfav, negative=fav
+//   totalAmount    – number to display in center (always positive)
+//   centerSign     – '+' | '−'
+//   centerColor    – css color for center value
+//   centerLabel    – small label above center value
+//   isDark         – bool, background is dark
+// Props:
+//   size      – SVG size in px (default 440; use 340 for compact left-column use)
+//   zoomed    – controlled zoom (cat name or null); if omitted, self-manages
+//   onZoom    – called when user clicks to zoom; required when zoomed is provided
+function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel, isDark,
+                        size, zoomed: zExt, onZoom, diverging, hideLegend }) {
+  const [zInt,    setZInt]    = useStateSB(null);
+  const [tooltip, setTooltip] = useStateSB(null);
+  const [hov,     setHov]     = useStateSB(null);
+  const controlled = onZoom !== undefined;
+  const zoomed    = controlled ? (zExt||null) : zInt;
+  const setZoomed = controlled ? onZoom : (c)=>{ setZInt(c); setTooltip(null); };
 
-// ── Waterfall SVG ─────────────────────────────────────────────────────────
-function V3Waterfall({ kpi, catAgg, sel, setSel }) {
-  const [hov, setHov] = useStateV3(null);
+  const data = items || [];
+  if (!data.length) return null;
 
-  // Build steps: running total walks through each category in spec order
-  let running = kpi.budget;
-  const steps = WF_STEP_ORDER.map(cat => {
-    const v    = Math.round((catAgg[cat]?.f || 0) - (catAgg[cat]?.b || 0));
-    const from = running;
-    const to   = running + v;
-    running    = to;
-    return { cat, v, from, to };
-  });
+  const totalAbs = data.reduce((s,c) => s + Math.abs(c.variance), 0);
+  const SZ = size || 440;
+  const SC = SZ / 440;
+  const CX=SZ/2, CY=SZ/2, R0=Math.round(55*SC), R1=Math.round(125*SC), R2=Math.round(188*SC), W=SZ, H=SZ;
 
-  // Y-scale: encompass all running totals, budget, forecast
-  const allVals = [kpi.budget, kpi.forecast, ...steps.map(s => s.from), ...steps.map(s => s.to)];
-  const rawMin  = Math.min(...allVals);
-  const rawMax  = Math.max(...allVals);
-  const spread  = Math.max(rawMax - rawMin, kpi.budget * 0.005);
-  // Floor well below budget so the bars have readable height; headroom above max for labels
-  const floorV  = rawMin - spread * 1.3;
-  const ceilV   = rawMax + spread * 0.65;
-  const vRange  = ceilV - floorV;
+  // Diverging scale for Net Position mode (computed at component scope for legend access)
+  const divCatScale = diverging ? Math.max(1, ...data.map(c => Math.abs(c.variance))) : 1;
 
-  // SVG geometry
-  const VW = 1160, VH = 420;
-  const CT = 76, CB = 86;
-  const CH = VH - CT - CB;
-  const AXIS_Y = CT + CH;
-  const CL = 28, CR = 1132;
-
-  // Bar widths — 10 items (Budget + 8 cats + Forecast) with equal gaps
-  const BW  = 98;   // Budget / Forecast bar
-  const CW  = 76;   // Category step bar
-  // CL + BW + 9*(GAP) + 8*CW + BW = CR  →  GAP = (CR-CL-2*BW-8*CW)/9
-  const GAP = (CR - CL - 2 * BW - 8 * CW) / 9;
-  const catX = i => CL + BW + GAP + i * (CW + GAP);
-  const fcX  = CL + BW + GAP + 8 * (CW + GAP);
-
-  const scY = v => CT + CH * (1 - (v - floorV) / vRange);
-
-  // Identify largest unfavorable and largest favorable for badges
-  const maxUnfav = Math.max(...steps.filter(s => s.v > 0).map(s => s.v),  0);
-  const maxFav   = Math.max(...steps.filter(s => s.v < 0).map(s => -s.v), 0);
-
-  const totalVar = kpi.forecast - kpi.budget;
-  const fav      = totalVar <= 0;
-  const FCC      = fav ? V3T.green : V3T.red;
-  const varPct   = kpi.budget ? Math.abs(totalVar / kpi.budget * 100).toFixed(1) : '0.0';
-
-  return (
-    <svg width="100%" viewBox={`0 0 ${VW} ${VH}`} style={{ display: 'block', overflow: 'visible' }}>
-
-      {/* Grid lines — subtle horizontal reference */}
-      {[0.25, 0.5, 0.75].map(t => {
-        const gy = CT + CH * t;
-        return <line key={t} x1={CL} y1={gy} x2={CR} y2={gy}
-          stroke="#ECEAE7" strokeWidth="1" strokeDasharray="2 4" />;
-      })}
-
-      {/* Axis baseline */}
-      <line x1={CL - 6} y1={AXIS_Y} x2={CR + 6} y2={AXIS_Y} stroke="#D4D2CE" strokeWidth="1.5" />
-      <text x={CL} y={AXIS_Y + 14} fill="#C6C4C0" fontFamily={V3T.sans} fontSize="9">
-        baseline {fmt.m(floorV)}
-      </text>
-
-      {/* ── Budget bar ─────────────────────────────────────────────── */}
-      {(() => {
-        const bY = scY(kpi.budget);
-        const bH = AXIS_Y - bY;
-        const cx = CL + BW / 2;
-        return (
-          <g>
-            <rect x={CL} y={bY} width={BW} height={bH} fill={V3T.navy} rx="1" />
-            <text x={cx} y={bY - 28} textAnchor="middle"
-              fill={V3T.stone} fontFamily={V3T.sans} fontWeight="700" fontSize="9" letterSpacing="0.12em">
-              BUDGET
-            </text>
-            <text x={cx} y={bY - 12} textAnchor="middle"
-              fill={V3T.navy} fontFamily={V3T.serif} fontWeight="700" fontSize="15"
-              style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {fmt.m(kpi.budget)}
-            </text>
-            <text x={cx} y={AXIS_Y + 22} textAnchor="middle"
-              fill={V3T.navy} fontFamily={V3T.sans} fontWeight="700" fontSize="12">
-              Annual Budget
-            </text>
-            {/* Connector dashed line to first step */}
-            <line x1={CL + BW} y1={bY} x2={catX(0)} y2={bY}
-              stroke="#CFCCC7" strokeWidth="1" strokeDasharray="4 3" />
-          </g>
-        );
-      })()}
-
-      {/* ── Category step bars ─────────────────────────────────────── */}
-      {steps.map((step, i) => {
-        const isNeut    = Math.abs(step.v) < 5000;
-        const isFav     = step.v < 0;
-        const color     = isNeut ? '#C8C6C2' : isFav ? V3T.green : V3T.red;
-        const isSel     = sel === step.cat;
-        const isHov     = hov === step.cat;
-        const isTopUnfav = step.v > 0 && step.v === maxUnfav;
-        const isTopFav  = step.v < 0 && -step.v === maxFav;
-        const cx        = catX(i) + CW / 2;
-
-        // Floating bar: from running total "before" to "after"
-        const hiVal = Math.max(step.from, step.to);
-        const loVal = Math.min(step.from, step.to);
-        const topY  = scY(hiVal);
-        const botY  = scY(loVal);
-        const stepH = Math.max(botY - topY, 2);
-
-        const connY = scY(step.to);
-        const nextX = i < 7 ? catX(i + 1) : fcX;
-        const catLabel = step.cat === 'Labor/ T&M' ? 'Labor/T&M' : step.cat;
-        const drillable = !isNeut;
-
-        return (
-          <g key={step.cat}
-            onClick={() => drillable && setSel(isSel ? null : step.cat)}
-            onMouseEnter={() => drillable && setHov(step.cat)}
-            onMouseLeave={() => setHov(null)}
-            style={{ cursor: drillable ? 'pointer' : 'default' }}>
-
-            {/* Expanded hit area */}
-            <rect x={catX(i) - 4} y={Math.min(topY - 40, AXIS_Y - stepH - 40)}
-              width={CW + 8} height={AXIS_Y - Math.min(topY - 40, AXIS_Y - stepH - 40) + 4}
-              fill="transparent" />
-
-            {/* Highlight ring on hover/select */}
-            {(isSel || isHov) && !isNeut && (
-              <rect x={catX(i) - 2} y={topY - 2} width={CW + 4} height={stepH + 4} rx="2"
-                fill="none" stroke={color} strokeWidth="1.5" opacity="0.6" />
-            )}
-
-            {/* Step bar */}
-            <rect x={catX(i)} y={topY} width={CW} height={stepH} rx="1"
-              fill={color}
-              opacity={isNeut ? 0.35 : (isSel || isHov) ? 1 : 0.82}
-              style={{ transition: 'opacity 0.12s' }} />
-
-            {/* "LARGEST UNFAVORABLE" badge */}
-            {isTopUnfav && (
-              <g>
-                <rect x={catX(i) + 4} y={topY - 23} width={CW - 8} height={15} rx="2"
-                  fill={V3T.red} opacity="0.14" />
-                <text x={cx} y={topY - 12} textAnchor="middle"
-                  fill={V3T.red} fontFamily={V3T.sans} fontWeight="800" fontSize="8" letterSpacing="0.1em">
-                  LARGEST DRIVER ▲
-                </text>
-              </g>
-            )}
-
-            {/* "LARGEST FAVORABLE" badge */}
-            {isTopFav && (
-              <g>
-                <rect x={catX(i) + 4} y={topY - 23} width={CW - 8} height={15} rx="2"
-                  fill={V3T.green} opacity="0.14" />
-                <text x={cx} y={topY - 12} textAnchor="middle"
-                  fill={V3T.green} fontFamily={V3T.sans} fontWeight="800" fontSize="8" letterSpacing="0.1em">
-                  LARGEST OFFSET ▼
-                </text>
-              </g>
-            )}
-
-            {/* Value label above bar */}
-            {!isNeut && (
-              <text x={cx} y={topY - (isTopUnfav || isTopFav ? 28 : 10)} textAnchor="middle"
-                fill={color} fontFamily={V3T.serif} fontWeight="700" fontSize="13"
-                style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {isFav ? '−' : '+'}{fmt.k(Math.abs(step.v))}
-              </text>
-            )}
-
-            {/* Category name */}
-            <text x={cx} y={AXIS_Y + 21} textAnchor="middle"
-              fill={isSel ? V3T.navy : (isHov ? '#3C3A36' : '#6C6A66')}
-              fontFamily={V3T.sans} fontWeight={isSel ? 700 : 500} fontSize="11.5">
-              {catLabel}
-            </text>
-
-            {/* Drill hint */}
-            {drillable && (
-              <text x={cx} y={AXIS_Y + 35} textAnchor="middle"
-                fill={isSel ? V3T.navy : color}
-                fontFamily={V3T.sans} fontSize="9"
-                opacity={isSel || isHov ? 0.9 : 0.45}>
-                {isSel ? '▲ close' : '▾ drill down'}
-              </text>
-            )}
-
-            {/* Connector dashed line to next bar */}
-            <line x1={catX(i) + CW} y1={connY} x2={nextX} y2={connY}
-              stroke="#CFCCC7" strokeWidth="1" strokeDasharray="4 3" />
-          </g>
-        );
-      })}
-
-      {/* ── Forecast bar ───────────────────────────────────────────── */}
-      {(() => {
-        const fY = scY(kpi.forecast);
-        const fH = AXIS_Y - fY;
-        const cx = fcX + BW / 2;
-        return (
-          <g>
-            <rect x={fcX} y={fY} width={BW} height={fH} fill={FCC} rx="1" />
-            <text x={cx} y={fY - 30} textAnchor="middle"
-              fill={FCC} fontFamily={V3T.sans} fontWeight="700" fontSize="9" letterSpacing="0.12em">
-              {fav ? '▲ FAVORABLE' : '▼ UNFAVORABLE'}{'  '}{fav ? '−' : '+'}{varPct}%
-            </text>
-            <text x={cx} y={fY - 12} textAnchor="middle"
-              fill={FCC} fontFamily={V3T.serif} fontWeight="700" fontSize="15"
-              style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {fmt.m(kpi.forecast)}
-            </text>
-            <text x={cx} y={AXIS_Y + 21} textAnchor="middle"
-              fill={FCC} fontFamily={V3T.sans} fontWeight="700" fontSize="12">
-              Year-End Forecast
-            </text>
-          </g>
-        );
-      })()}
-
-      {/* Reconciliation note */}
-      <text x={VW / 2} y={VH - 4} textAnchor="middle" fill="#C6C4C0" fontFamily={V3T.sans} fontSize="9.5">
-        {`Budget ${fmt.m(kpi.budget)} ${fav ? '−' : '+'} ${fmt.m(Math.abs(totalVar))} forecast variance = ${fmt.m(kpi.forecast)}`}
-      </text>
-    </svg>
-  );
-}
-
-// ── Main OverviewTabV3 ────────────────────────────────────────────────────
-function OverviewTabV3({ data }) {
-  const [sel,       setSel]       = useStateV3(null);
-  const [openPanel, setOpenPanel] = useStateV3(null);
-  const [flt,       setFlt]       = useStateV3({ domains: [], owners: [], cats: [] });
-
-  const allItems = data.lineItems || [];
-  const lookups  = data.lookups   || {};
-
-  const domainOpts = useMemoV3(() => {
-    if (lookups.domains?.length) return lookups.domains.filter(Boolean).sort();
-    return [...new Set(allItems.map(li => li.domain).filter(Boolean))].sort();
-  }, [allItems, lookups]);
-
-  const ownerOpts = useMemoV3(() => {
-    if (lookups.owners?.length) return lookups.owners.filter(x => x && x !== 'N/A').sort();
-    return [...new Set(allItems.map(li => li.owner).filter(x => x && x !== 'N/A'))].sort();
-  }, [allItems, lookups]);
-
-  const items = useMemoV3(() => {
-    const { domains, owners, cats } = flt;
-    if (!domains.length && !owners.length && !cats.length) return allItems;
-    return allItems.filter(li => {
-      if (domains.length && !domains.includes(li.domain)) return false;
-      if (owners.length  && !owners.includes(li.owner))   return false;
-      if (cats.length    && !cats.includes(v3Cat(li)))     return false;
-      return true;
+  // Build segments
+  const segs = [];
+  if (!zoomed) {
+    let angle = 0;
+    data.forEach((cat, ci) => {
+      const catSpan = totalAbs > 0 ? (Math.abs(cat.variance) / totalAbs) * 2 * Math.PI : 0;
+      const isUnfav = cat.variance > 0;
+      segs.push({
+        key:'c'+ci, type:'cat', label:cat.cat, variance:cat.variance,
+        parentLabel:'total', parentAbs:totalAbs,
+        d:arc(CX,CY,R0,R1,angle,angle+catSpan),
+        fill:diverging ? netDivColorSB(cat.variance, divCatScale, 0) : catColorSB(cat.cat,0,ci),
+        onClick:()=>setZoomed(cat.cat),
+        hint:'Click to drill into vendors',
+      });
+      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
+      let va = angle;
+      cat.vendors.forEach((vnd,vi) => {
+        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*catSpan : 0;
+        segs.push({
+          key:'v'+ci+'_'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
+          labelFull:vnd.name, variance:vnd.variance,
+          parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
+          d:arc(CX,CY,R1,R2,va,va+vSpan),
+          fill:diverging ? netDivColorSB(vnd.variance, divCatScale, 1) : catColorSB(cat.cat,1,vi),
+          onClick:()=>setZoomed(cat.cat),
+          hint:'Click to drill in',
+        });
+        va += vSpan;
+      });
+      angle += catSpan;
     });
-  }, [allItems, flt]);
-
-  const filterActive = flt.domains.length + flt.owners.length + flt.cats.length > 0;
-  const clearFilters = () => setFlt({ domains: [], owners: [], cats: [] });
-
-  // KPIs: use workbook subtotals when no filter active (exact reconciliation)
-  const kpi = useMemoV3(() => {
-    if (!filterActive && data.workbookSubtotal) {
-      const ws = data.workbookSubtotal;
-      return { budget: ws.budget, forecast: ws.forecast, actual: ws.actual,
-               remaining: ws.remaining, risk: ws.risk, opp: ws.absOpp, net: ws.net };
+  } else {
+    const cat = data.find(c=>c.cat===zoomed);
+    if (cat) {
+      const isUnfav = cat.variance > 0;
+      const divVndScale = diverging ? Math.max(1, ...cat.vendors.map(v => Math.abs(v.variance))) : 1;
+      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
+      let va = 0;
+      cat.vendors.forEach((vnd,vi) => {
+        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*2*Math.PI : 0;
+        segs.push({
+          key:'zv'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
+          labelFull:vnd.name, variance:vnd.variance,
+          parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
+          d:arc(CX,CY,R0,R1,va,va+vSpan),
+          fill:diverging ? netDivColorSB(vnd.variance, divVndScale, 0) : catColorSB(zoomed,1,vi), onClick:null,
+        });
+        const divCtScale = diverging ? Math.max(1, ...vnd.contracts.map(c => Math.abs(c.variance))) : 1;
+        const vndAbsCt = vnd.contracts.reduce((s,c)=>s+Math.abs(c.variance),0);
+        let ca = va;
+        vnd.contracts.forEach((ct,ci) => {
+          const cSpan = vndAbsCt > 0 ? (Math.abs(ct.variance)/vndAbsCt)*vSpan : 0;
+          segs.push({
+            key:'zc'+vi+'_'+ci, type:'contract',
+            label:ct.name.length>34?ct.name.slice(0,33)+'…':ct.name,
+            labelFull:ct.name, variance:ct.variance,
+            parentLabel:vnd.name.length>18?vnd.name.slice(0,17)+'…':vnd.name,
+            parentAbs:Math.abs(vnd.variance),
+            d:arc(CX,CY,R1,R2,ca,ca+cSpan),
+            fill:diverging ? netDivColorSB(ct.variance, divCtScale, 1) : catColorSB(zoomed,2,ci), onClick:null,
+          });
+          ca += cSpan;
+        });
+        va += vSpan;
+      });
     }
-    let b = 0, f = 0, a = 0, r = 0, o = 0, n = 0;
-    for (const li of items) {
-      b += li.budget || 0; f += li.forecast || 0; a += li.actual || 0;
-      r += li.risk   || 0; o += li.opp      || 0; n += li.net    || 0;
-    }
-    return { budget: b, forecast: f, actual: a, remaining: f - a, risk: r, opp: Math.abs(o), net: n };
-  }, [items, filterActive, data.workbookSubtotal]);
+  }
 
-  // Category aggregation for waterfall steps
-  const catAgg = useMemoV3(() => {
-    const agg = {};
-    for (const li of items) {
-      const c = v3Cat(li);
-      if (!agg[c]) agg[c] = { b: 0, f: 0 };
-      agg[c].b += li.budget   || 0;
-      agg[c].f += li.forecast || 0;
-    }
-    return agg;
-  }, [items]);
+  function onMove(e, seg) {
+    const pP = seg.parentAbs>0?(Math.abs(seg.variance)/seg.parentAbs*100).toFixed(1):'0.0';
+    const pT = totalAbs>0?(Math.abs(seg.variance)/totalAbs*100).toFixed(1):'0.0';
+    setHov(seg.key);
+    setTooltip({ px:e.clientX, py:e.clientY, label:seg.labelFull||seg.label,
+      variance:seg.variance, pctParent:pP, pctTotal:pT, parentLabel:seg.parentLabel, hint:seg.hint||null });
+  }
+  function onLeave() { setHov(null); setTooltip(null); }
 
-  // Drill rows for the selected waterfall step
-  const drillRows = useMemoV3(() => {
-    if (!sel) return [];
-    const by = {};
-    for (const li of items) {
-      if (v3Cat(li) !== sel) continue;
-      const key = sel === 'FPC' ? (li.project || li.vendor || 'Other') : (li.vendor || 'Other');
-      if (!by[key]) by[key] = 0;
-      by[key] += (li.forecast || 0) - (li.budget || 0);
-    }
-    const total = Object.values(by).reduce((s, v) => s + v, 0);
-    const rows  = Object.entries(by)
-      .map(([name, v]) => ({ name, v: Math.round(v) }))
-      .filter(r => Math.abs(r.v) >= 500)
-      .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
-      .slice(0, 10);
-    const rest = Math.round(total - rows.reduce((s, r) => s + r.v, 0));
-    if (Math.abs(rest) >= 1) rows.push({ name: 'Other', v: rest });
-    return rows;
-  }, [sel, items]);
+  const zCatLgd = zoomed ? data.find(c=>c.cat===zoomed) : null;
+  const divLgdVScale = (diverging && zCatLgd) ? Math.max(1, ...zCatLgd.vendors.map(v => Math.abs(v.variance))) : 1;
+  const legendItems = zoomed
+    ? (data.find(c=>c.cat===zoomed)?.vendors||[]).map((v,i)=>({ label:v.name, variance:v.variance,
+        color: diverging ? netDivColorSB(v.variance, divLgdVScale, 0) : catColorSB(zoomed,1,i) }))
+    : data.map((c,i)=>({ label:c.cat, variance:c.variance,
+        color: diverging ? netDivColorSB(c.variance, divCatScale, 0) : catColorSB(c.cat,0,i),
+        onClick:()=>setZoomed(c.cat) }));
 
-  const drillCatV   = sel ? Math.round((catAgg[sel]?.f || 0) - (catAgg[sel]?.b || 0)) : 0;
-  const drillMaxAbs = Math.max(...drillRows.map(r => Math.abs(r.v)), 1);
+  const bg  = isDark ? 'transparent' : '#F9F8F5';
+  const lgC = isDark ? 'rgba(255,255,255,0.82)' : 'var(--antares-soft-black)';
+  const sgC = isDark ? 'var(--antares-stone-gray)' : 'var(--antares-stone-gray)';
 
-  // Risk / Opp / Net hierarchies (same pattern as classic view)
-  const dynRisk = useMemoV3(() => v3BuildDrillHierarchy(items, li => li.risk || 0), [items]);
-  const dynOpp  = useMemoV3(() => v3BuildDrillHierarchy(items, li => Math.abs(li.opp || 0)), [items]);
-  const dynNet  = useMemoV3(() => v3BuildDrillHierarchy(items, li => li.net || 0), [items]);
-
-  const CARD = { background: '#fff', border: `1px solid ${V3T.border}` };
-  const MB20 = { marginBottom: 20 };
+  const compact = SZ < 400;
 
   return (
-    <div>
-
-      {/* ══ FILTER BAR ══════════════════════════════════════════════════ */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <span style={{ fontFamily: V3T.serif, fontWeight: 800, fontSize: 10,
-          letterSpacing: '0.22em', textTransform: 'lowercase',
-          color: V3T.stone, marginRight: 4 }}>filter</span>
-        <V3FilterDrop label="Domain"       options={domainOpts}  value={flt.domains} onChange={v => setFlt({ ...flt, domains: v })} />
-        <V3FilterDrop label="Domain Owner" options={ownerOpts}   value={flt.owners}  onChange={v => setFlt({ ...flt, owners: v })}  />
-        <V3FilterDrop label="Category"     options={V3_CATS_ALL} value={flt.cats}    onChange={v => setFlt({ ...flt, cats: v })}    />
-        {filterActive && (<>
-          <button onClick={clearFilters} style={{
-            padding: '6px 12px', background: 'none', border: `1px solid ${V3T.border}`,
-            cursor: 'pointer', fontFamily: V3T.sans, fontSize: 12, color: V3T.stone,
-          }}>✕ Clear all</button>
-          <span style={{ fontSize: 11, color: V3T.stone, fontStyle: 'italic', fontFamily: V3T.sans }}>
-            Filtered view · {items.length} of {allItems.length} rows
-          </span>
-        </>)}
-      </div>
-
-      {/* ══ ROW 1 — 4 PRIMARY KPIs ══════════════════════════════════════ */}
-      <div style={{ ...CARD, ...MB20, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)' }}>
-        {[
-          { label: 'annual budget',      val: fmt.m(kpi.budget),    sub: '2026 approved budget' },
-          { label: 'year-end forecast',  val: fmt.m(kpi.forecast),  sub: 'actuals + remaining forecast' },
-          { label: 'ytd actual spend',   val: fmt.m(kpi.actual),    sub: `${kpi.budget > 0 ? (kpi.actual / kpi.budget * 100).toFixed(1) : 0}% of budget consumed` },
-          { label: 'remaining forecast', val: fmt.m(kpi.remaining), sub: 'balance to year-end' },
-        ].map((k, i) => (
-          <div key={i} style={{ padding: '32px 28px 28px', borderLeft: i > 0 ? `1px solid ${V3T.border}` : 'none' }}>
-            <V3Eyebrow text={k.label} />
-            <div style={{ fontFamily: V3T.serif, fontWeight: 600, fontSize: 40, lineHeight: 1,
-              letterSpacing: '-0.01em', color: V3T.navy, fontVariantNumeric: 'tabular-nums' }}>{k.val}</div>
-            <div style={{ fontSize: 12, color: V3T.stone, marginTop: 9 }}>{k.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* ══ ROW 2 — NET OPP/RISK ════════════════════════════════════════ */}
-      <div style={{ ...CARD, ...MB20, display: 'grid', gridTemplateColumns: '1fr 1fr',
-        maxWidth: 860, margin: '0 auto 20px' }}>
-
-        {/* Net position */}
-        <button onClick={() => setOpenPanel({ type: 'net' })} style={{
-          padding: '28px 28px 24px', background: V3T.navy, border: 'none',
-          borderRight: `1px solid rgba(255,255,255,0.15)`,
-          textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
-          transition: 'filter 0.12s', width: '100%',
-          display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        }}
-          onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.15)'}
-          onMouseLeave={e => e.currentTarget.style.filter = 'none'}>
-          <V3Eyebrow text="net opp/risk position" light />
-          <div style={{ fontFamily: V3T.serif, fontWeight: 600, fontSize: 36, lineHeight: 1,
-            letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums',
-            color: kpi.net > 0 ? '#E87878' : '#72D4A0' }}>{fmt.m(Math.abs(kpi.net))}</div>
-          <div style={{ fontSize: 12, fontWeight: 500, marginTop: 9,
-            color: kpi.net > 0 ? '#E87878' : '#72D4A0' }}>
-            {kpi.net > 0 ? '\u25bc\u2002net unfavorable' : '\u25b2\u2002net favorable'}
-          </div>
-          <div style={{ marginTop: 10, fontSize: 11, color: 'rgba(255,255,255,0.5)',
-            display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-            explore variance
-          </div>
-        </button>
-
-        {/* Opp + Risk stacked */}
-        <div style={{ display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${V3T.border}` }}>
-          <button onClick={() => setOpenPanel({ type: 'opp' })} style={{
-            flex: 1, padding: '24px 28px 20px', borderTop: `3px solid ${V3T.green}`,
-            borderRight: 'none', borderLeft: 'none', borderBottom: `1px solid ${V3T.border}`,
-            background: 'transparent', textAlign: 'left', cursor: 'pointer',
-            fontFamily: 'inherit', transition: 'background 0.12s', width: '100%',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = '#EAF4EE'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <V3Eyebrow text="opportunities" />
-            <div style={{ fontFamily: V3T.serif, fontWeight: 600, fontSize: 32, lineHeight: 1,
-              letterSpacing: '-0.01em', color: V3T.green, fontVariantNumeric: 'tabular-nums' }}>{fmt.m(kpi.opp)}</div>
-            <div style={{ fontSize: 12, color: V3T.stone, marginTop: 8 }}>favorable upside</div>
-            <div style={{ marginTop: 8, fontSize: 11, color: V3T.green, opacity: 0.65,
-              display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-              investigate
-            </div>
-          </button>
-          <button onClick={() => setOpenPanel({ type: 'risk' })} style={{
-            flex: 1, padding: '24px 28px 20px', borderTop: `3px solid ${V3T.red}`,
-            borderRight: 'none', borderLeft: 'none', borderBottom: 'none',
-            background: 'transparent', textAlign: 'left', cursor: 'pointer',
-            fontFamily: 'inherit', transition: 'background 0.12s', width: '100%',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = '#FBEDED'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <V3Eyebrow text="risk" />
-            <div style={{ fontFamily: V3T.serif, fontWeight: 600, fontSize: 32, lineHeight: 1,
-              letterSpacing: '-0.01em', color: V3T.red, fontVariantNumeric: 'tabular-nums' }}>{fmt.m(kpi.risk)}</div>
-            <div style={{ fontSize: 12, color: V3T.stone, marginTop: 8 }}>downside exposure</div>
-            <div style={{ marginTop: 8, fontSize: 11, color: V3T.red, opacity: 0.65,
-              display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-              investigate
-            </div>
-          </button>
+    <div style={{ position:'relative' }} onMouseLeave={onLeave}>
+      <SBTooltip tip={tooltip} />
+      <div style={{ display:'flex', gap:compact?12:24, alignItems:'flex-start', flexWrap:'wrap' }}>
+        <div style={{ flexShrink:0, position:'relative' }}>
+          {zoomed && (
+            <button onClick={()=>{setZoomed(null);setTooltip(null);}} style={{
+              position:'absolute', top:6, right:6, zIndex:2, background:'none',
+              border:'1px solid rgba(255,255,255,0.22)', borderRadius:2,
+              padding:'3px 10px', fontSize:11, cursor:'pointer',
+              color:'rgba(255,255,255,0.7)', fontFamily:SB_SANS,
+            }}>← back</button>
+          )}
+          <svg width={W} height={H} style={{ display:'block' }}>
+            <circle cx={CX} cy={CY} r={R2+4} fill={bg} />
+            {segs.map(s=>(
+              <path key={s.key} d={s.d} fill={s.fill}
+                fillOpacity={hov===s.key?1:0.82} stroke={isDark?'rgba(0,0,0,0.35)':'#fff'} strokeWidth="1.5"
+                style={{ cursor:s.onClick?'pointer':'default', transition:'fill-opacity 0.1s' }}
+                onMouseMove={e=>onMove(e,s)} onMouseEnter={e=>onMove(e,s)} onClick={s.onClick}
+              />
+            ))}
+            <circle cx={CX} cy={CY} r={R0-3} fill={isDark?'rgba(0,0,0,0.4)':'#fff'}
+              stroke={isDark?'rgba(255,255,255,0.12)':'var(--color-border)'} strokeWidth="1" />
+            {(()=>{
+              const rawLbl = zoomed ? (data.find(c=>c.cat===zoomed)?.cat||'') : (centerLabel||'');
+              const words = rawLbl.trim().split(/\s+/).filter(Boolean);
+              const lines = words.length > 1
+                ? [words.slice(0,Math.ceil(words.length/2)).join(' '), words.slice(Math.ceil(words.length/2)).join(' ')]
+                : [rawLbl];
+              const topY = lines.length > 1 ? CY-22 : CY-14;
+              return (
+                <text textAnchor="middle" fontFamily={SB_SERIF} fontWeight="800"
+                  fontSize="8" fill={isDark?'rgba(255,255,255,0.48)':'var(--antares-stone-gray)'}
+                  letterSpacing="0.1em">
+                  {lines.map((ln,i)=>(
+                    <tspan key={i} x={CX} y={topY+i*11} style={{ textTransform:'uppercase' }}>{ln}</tspan>
+                  ))}
+                </text>
+              );
+            })()}
+            <text x={CX} y={CY+7} textAnchor="middle" fontFamily={SB_SERIF} fontWeight="600"
+              fontSize="15" fill={zoomed?(data.find(c=>c.cat===zoomed)?.variance>0?SB_RED:SB_GREEN):centerColor}>
+              {zoomed
+                ? ((data.find(c=>c.cat===zoomed)?.variance||0)<0?'−':'+') + fmt.m(Math.abs(data.find(c=>c.cat===zoomed)?.variance||0))
+                : centerSign + fmt.m(totalAmount)}
+            </text>
+            {!hideLegend && <text x={CX} y={CY+21} textAnchor="middle" fontFamily={SB_SANS} fontSize="9"
+              fill={isDark?'rgba(255,255,255,0.38)':'var(--antares-stone-gray)'}>
+              {zoomed ? 'click ← to reset' : 'click segment to drill'}
+            </text>}
+          </svg>
         </div>
-      </div>
-
-      {/* ══ ROW 3 — WATERFALL (replaces Executive Bridge + Drivers) ═════ */}
-      <div style={{ ...CARD, ...MB20, padding: '28px 32px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div>
-            <V3Eyebrow text="budget to forecast · category bridge" />
-            <div style={{ fontFamily: V3T.serif, fontWeight: 600, fontSize: 20,
-              color: V3T.navy, letterSpacing: '-0.005em' }}>
-              Forecast Variance Waterfall
-            </div>
-            <div style={{ fontSize: 12, color: V3T.stone, marginTop: 5 }}>
-              Each step shows how that category moved the forecast away from budget · click any bar to drill down
-            </div>
+        {!hideLegend && (
+        <div style={{ paddingTop:14, minWidth:190, maxWidth:240 }}>
+          <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
+            color:isDark?'rgba(255,255,255,0.4)':SB_NAVY, fontFamily:SB_SERIF, marginBottom:12 }}>
+            {zoomed ? zoomed + ' — Vendors' : 'Categories'}
           </div>
-          <div style={{ display: 'flex', gap: 18, alignItems: 'center', paddingTop: 6, flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 10, height: 10, background: V3T.green, borderRadius: 1 }} />
-              <span style={{ fontSize: 11, color: V3T.stone }}>Favorable</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 10, height: 10, background: V3T.red, borderRadius: 1 }} />
-              <span style={{ fontSize: 11, color: V3T.stone }}>Unfavorable</span>
-            </div>
-          </div>
-        </div>
-
-        <V3Waterfall kpi={kpi} catAgg={catAgg} sel={sel} setSel={setSel} />
-      </div>
-
-      {/* ══ DRILL PANEL — vendor / contract detail for selected step ════ */}
-      <div style={{ ...CARD, overflow: 'hidden', marginBottom: 20 }}>
-        {!sel ? (
-          <div style={{ padding: '22px 44px', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#ECEAE7',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#999"
-                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m9 18 6-6-6-6" />
-              </svg>
-            </div>
-            <div style={{ fontSize: 13, color: V3T.stone }}>
-              Select a category bar above to view contributing vendors, contracts, and projects.
-            </div>
-          </div>
-        ) : (
-          <div style={{ padding: '28px 44px 32px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-              <div>
-                <div style={{ fontFamily: V3T.serif, fontWeight: 800, fontSize: 10,
-                  letterSpacing: '0.22em', textTransform: 'lowercase',
-                  color: V3T.stone, marginBottom: 8 }}>
-                  {sel === 'FPC' ? 'fixed price contracts' : `${sel.toLowerCase()} · vendor detail`}
-                </div>
-                <div style={{ fontFamily: V3T.serif, fontWeight: 600, fontSize: 18, color: V3T.navy, marginBottom: 4 }}>
-                  {sel} — Variance Detail
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
-                  fontFamily: V3T.sans, color: drillCatV < 0 ? V3T.green : V3T.red }}>
-                  {drillCatV < 0 ? '\u2212' : '+'}{fmt.m(Math.abs(drillCatV))}
-                  {'\u2002'}net {drillCatV < 0 ? 'favorable' : 'unfavorable'}
-                </div>
+          {legendItems.map((item,i)=>(
+            <div key={i} onClick={item.onClick}
+              style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6,
+                cursor:item.onClick?'pointer':'default', opacity:1, transition:'opacity 0.1s' }}
+              onMouseEnter={e=>{if(item.onClick)e.currentTarget.style.opacity='0.7';}}
+              onMouseLeave={e=>{e.currentTarget.style.opacity='1';}}>
+              <div style={{ width:11, height:11, background:item.color, flexShrink:0, borderRadius:2 }} />
+              <div style={{ fontSize:12, color:lgC, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {item.label}
               </div>
-              <button onClick={() => setSel(null)} style={{
-                padding: '5px 12px', background: 'none', border: `1px solid ${V3T.border}`,
-                fontSize: 12, color: V3T.stone, cursor: 'pointer', fontFamily: V3T.sans,
-              }}>✕ close</button>
+              <div style={{ fontSize:12, fontWeight:600, fontVariantNumeric:'tabular-nums', fontFamily:SB_SANS,
+                flexShrink:0, color:item.variance>0?SB_RED:SB_GREEN }}>
+                {item.variance>0?'+':'−'}{fmt.k(Math.abs(item.variance))}
+              </div>
             </div>
-
-            {drillRows.length > 0
-              ? drillRows.map((r, i) => {
-                  const rFav = r.v < 0;
-                  const rCol = rFav ? V3T.green : V3T.red;
-                  const rPct = (Math.abs(r.v) / drillMaxAbs) * 72;
-                  return (
-                    <div key={i} style={{
-                      display: 'grid', gridTemplateColumns: '250px 1fr 100px',
-                      alignItems: 'center', gap: 14, padding: '10px 0',
-                      borderBottom: i < drillRows.length - 1 ? '1px solid #EBEBEB' : 'none',
-                    }}>
-                      <div style={{ fontSize: 13, color: '#3C3A36', overflow: 'hidden',
-                        textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-                      <div style={{ height: 8, background: '#ECEAE7', borderRadius: 2 }}>
-                        <div style={{ height: '100%', width: `${rPct}%`,
-                          background: rCol, borderRadius: 2, transition: 'width 0.35s' }} />
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: rCol,
-                        fontVariantNumeric: 'tabular-nums', fontFamily: V3T.sans, textAlign: 'right' }}>
-                        {rFav ? '\u2212' : '+'}{fmt.k(Math.abs(r.v))}
-                      </div>
-                    </div>
-                  );
-                })
-              : (
-                <div style={{ fontSize: 13, color: V3T.stone, fontStyle: 'italic' }}>
-                  No material variance contributors for {sel}.
-                </div>
-              )
-            }
-          </div>
+          ))}
+          {!zoomed && (
+            <div style={{ marginTop:12, paddingTop:8, borderTop:`1px solid ${isDark?'rgba(255,255,255,0.1)':'var(--color-border)'}`,
+              fontSize:11, color:sgC, lineHeight:1.6 }}>
+              Inner: categories<br/>
+              Outer: vendors<br/>
+              Click to drill in
+            </div>
+          )}
+        </div>
         )}
       </div>
-
-      {/* ── KPI Drill Panels ─────────────────────────────────────────── */}
-      {openPanel?.type === 'risk' && <KPIDrillPanel mode="risk" rawData={dynRisk} onClose={() => setOpenPanel(null)} />}
-      {openPanel?.type === 'opp'  && <KPIDrillPanel mode="opp"  rawData={dynOpp}  onClose={() => setOpenPanel(null)} />}
-      {openPanel?.type === 'net'  && <NetDrillPanel             rawData={dynNet}  onClose={() => setOpenPanel(null)} />}
-
     </div>
   );
 }
 
-window.OverviewTabV3 = OverviewTabV3;
+window.SunburstView = SunburstView;

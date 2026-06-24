@@ -41,7 +41,7 @@ function App({ data: initialData }) {
     document.body.className = `mood-${t.mood} density-${t.density}`;
   }, [t.mood, t.density]);
 
-  // ── Handle workbook upload — persist, update state, re-mount overview ──
+  // ── Handle workbook upload — update current view only, do not persist stale browser data ──
   function handleUpload(filename, parsedData) {
     const now = new Date();
     const info = {
@@ -115,7 +115,7 @@ function App({ data: initialData }) {
       {/* ── TOP BAR ───────────────────────────────────────────────────── */}
       <div className="topbar">
         <div className="brand">
-          <img src={(window.__resources && window.__resources.antaresLogo) || 'assets/logos/antares-primary-white.png'} alt="Antares" />
+          <img src={(window.__resources && window.__resources.antaresLogo) || 'design-system/antares-primary-white.png'} alt="Antares" />
         </div>
         <div className="title-block">
           <div className="eyebrow">a n t a r e s &nbsp; c a p i t a l</div>
@@ -153,29 +153,6 @@ function App({ data: initialData }) {
         </div>
       </div>
 
-      {/* ── PORTFOLIO SCOPE BAR ──────────────────────────────────────── */}
-      <div style={{
-        background: '#F0EEE9',
-        borderBottom: '1px solid var(--color-border)',
-        padding: '10px 28px', display: 'flex', alignItems: 'center', gap: 10,
-        minHeight: 44,
-      }}>
-        <span style={{ fontSize:12, fontFamily:'var(--font-sans)', color:'var(--antares-stone-gray)', fontWeight:500 }}>
-          Full Technology Portfolio
-        </span>
-        <span style={{ fontSize:11, color:'var(--color-border)' }}>·</span>
-        <span style={{ fontSize:11, fontFamily:'var(--font-sans)', color:'var(--antares-stone-gray)', fontStyle:'italic' }}>
-          Capitalization excluded · Amortization included
-        </span>
-        {sourceInfo && sourceInfo.filename && (
-          <>
-            <span style={{ fontSize:11, color:'var(--color-border)' }}>·</span>
-            <span style={{ fontSize:11, fontFamily:'var(--font-sans)', color:'var(--antares-stone-gray)', fontStyle:'italic' }}>
-              {sourceInfo.filename}
-            </span>
-          </>
-        )}
-      </div>
 
       {/* ── TAB BAR ──────────────────────────────────────────────────── */}
       <div className="tabs-bar">
@@ -241,21 +218,57 @@ function App({ data: initialData }) {
       console.warn('[boot] localStorage clear failed:', e.message);
     }
 
-    // ── 1. Always load the latest workbook from GitHub Pages.
+    // Always load the latest workbook from the GitHub repository, not only
+    // from GitHub Pages. Pages/CDN/browser layers can cache a same-name XLSX
+    // even after Power Automate commits a replacement. The GitHub Contents API
+    // gives us the current file SHA and a fresh download_url for the committed
+    // uploads/new_workbook.xlsx. If that fails, fall back to the Pages path.
     try {
-      const baseExcelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
-      const sep = baseExcelUrl.includes('?') ? '&' : '?';
-      const resp = await fetch(baseExcelUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
-      if (resp.ok) {
-        const buf = await resp.arrayBuffer();
-        data = parseTechFinancialsXlsxFromArrayBuffer(buf);
-        data._bootSource = 'excel';
+      const repoApiUrl = 'https://api.github.com/repos/ari-gurovich-antares/tech_financials_dashboard/contents/uploads/new_workbook.xlsx?ref=main';
+      const metaResp = await fetch(repoApiUrl + '&v=' + Date.now(), {
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/vnd.github+json'
+        }
+      });
+
+      if (metaResp.ok) {
+        const meta = await metaResp.json();
+        const dl = meta.download_url;
+        if (dl) {
+          const dlSep = dl.includes('?') ? '&' : '?';
+          const fileResp = await fetch(dl + dlSep + 'sha=' + encodeURIComponent(meta.sha || Date.now()), { cache: 'no-store' });
+          if (fileResp.ok) {
+            const buf = await fileResp.arrayBuffer();
+            data = parseTechFinancialsXlsxFromArrayBuffer(buf);
+            data._bootSource = 'github-api-excel';
+            data._workbookSha = meta.sha || null;
+          }
+        }
+      } else {
+        console.warn('[boot] GitHub API workbook metadata failed:', metaResp.status, metaResp.statusText);
       }
     } catch(e) {
-      console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
+      console.warn('[boot] GitHub API workbook load failed, trying Pages workbook:', e.message);
     }
 
-    // ── 2. Fall back to financials.json
+    // Fall back to GitHub Pages workbook with cache busting.
+    if (!data) {
+      try {
+        const baseExcelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
+        const sep = baseExcelUrl.includes('?') ? '&' : '?';
+        const resp = await fetch(baseExcelUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
+        if (resp.ok) {
+          const buf = await resp.arrayBuffer();
+          data = parseTechFinancialsXlsxFromArrayBuffer(buf);
+          data._bootSource = 'pages-excel';
+        }
+      } catch(e) {
+        console.warn('[boot] Pages Excel load failed, using JSON fallback:', e.message);
+      }
+    }
+
+    // Fall back to financials.json if the workbook cannot be loaded.
     if (!data) {
       const baseJsonUrl = (window.__resources && window.__resources.financialsJson) || 'data/financials.json';
       const sep = baseJsonUrl.includes('?') ? '&' : '?';
