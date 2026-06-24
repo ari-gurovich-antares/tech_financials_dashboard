@@ -1,125 +1,53 @@
-// Category tab — Annual Budget vs Year-End Forecast by Category
-// "Category" in this tab maps to Sub-Category1 from the Master Data
-const { useMemo: useMemoC } = React;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>2026 Tech Financials Dashboard · Antares</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
 
-function CategoryTab({ data }) {
-  // Aggregate by Sub-Category1 (displayed as "Category")
-  const rows = useMemoC(() => {
-    const map = {};
-    (data.lineItems || []).forEach(li => {
-      // Apply the same global filters that already shape data.vendors
-      // (we re-aggregate from lineItems here for accuracy on this view)
-      const key = li.subCategory || '— Uncategorized —';
-      if (!map[key]) map[key] = { name: key, budget: 0, actual: 0, forecast: 0, net: 0, count: 0 };
-      map[key].budget += li.budget;
-      map[key].actual += li.actual;
-      map[key].forecast += li.forecast;
-      map[key].net += li.net;
-      map[key].count += 1;
-    });
-    // Apply current filter set (mirrors filter-bar's filterLineItems but quickly)
-    return Object.values(map)
-      .map(r => ({ ...r, yef: r.budget + r.net }))
-      .sort((a,b) => b.budget - a.budget);
-  }, [data]);
+<template id="__bundler_thumbnail">
+<svg viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="80" fill="#333C66"/>
+  <rect x="8" y="8" width="24" height="14" rx="1" fill="rgba(255,255,255,0.18)"/>
+  <rect x="36" y="8" width="24" height="14" rx="1" fill="rgba(255,255,255,0.18)"/>
+  <rect x="64" y="8" width="24" height="14" rx="1" fill="rgba(255,255,255,0.18)"/>
+  <rect x="92" y="8" width="20" height="14" rx="1" fill="#6699FF" opacity="0.6"/>
+  <rect x="16" y="32" width="14" height="22" fill="rgba(255,255,255,0.35)"/>
+  <rect x="34" y="40" width="14" height="6" fill="#72D4A0" opacity="0.8"/>
+  <rect x="52" y="34" width="14" height="20" fill="rgba(255,255,255,0.25)"/>
+  <rect x="8" y="60" width="30" height="4" rx="1" fill="#72D4A0" opacity="0.7"/>
+  <rect x="8" y="66" width="18" height="4" rx="1" fill="#72D4A0" opacity="0.5"/>
+  <rect x="8" y="72" width="46" height="4" rx="1" fill="#E87878" opacity="0.7"/>
+  <text x="96" y="72" font-family="Georgia,serif" font-size="18" font-weight="700" fill="rgba(255,255,255,0.22)" letter-spacing="-1">A</text>
+</svg>
+</template>
 
-  // Use filtered line items if available
-  const filteredRows = useMemoC(() => {
-    const f = data.filters || {};
-    const items = (typeof window.filterLineItems === 'function' && data.lineItems)
-      ? window.filterLineItems(data.lineItems, f)
-      : (data.lineItems || []);
-    const map = {};
-    items.forEach(li => {
-      const key = li.subCategory || '— Uncategorized —';
-      if (!map[key]) map[key] = { name: key, budget: 0, actual: 0, forecast: 0, net: 0, count: 0 };
-      map[key].budget += li.budget;
-      map[key].actual += li.actual;
-      map[key].forecast += li.forecast;
-      map[key].net += li.net;
-      map[key].count += 1;
-    });
-    return Object.values(map)
-      .map(r => ({ ...r, yef: r.budget + r.net }))
-      .sort((a,b) => b.budget - a.budget);
-  }, [data]);
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="parse-excel.js"></script>
+<script src="drill-data.js"></script>
 
-  const display = filteredRows.length ? filteredRows : rows;
-  const totalBudget = display.reduce((s,r) => s + r.budget, 0);
-  const totalYef = display.reduce((s,r) => s + r.yef, 0);
-  const max = Math.max(...display.map(r => Math.max(r.budget, r.yef)), 1);
-
-  return (
-    <div>
-      {/* Hero summary strip */}
-      <div className="kpi-grid mb-4" style={{gridTemplateColumns:'repeat(3,1fr)'}}>
-        <div className="kpi">
-          <div className="kpi-label">categories</div>
-          <div className="kpi-value">{display.length}</div>
-          <div className="kpi-sub">distinct sub-category1 buckets</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">total annual budget</div>
-          <div className="kpi-value">{fmt.m(totalBudget)}</div>
-          <div className="kpi-sub">sum across categories</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-label">total year-end forecast</div>
-          <div className="kpi-value" style={{color: totalYef > totalBudget ? 'var(--risk-red)' : 'var(--antares-signature-navy)'}}>{fmt.m(totalYef)}</div>
-          <div className="kpi-sub">{fmt.signed(totalYef - totalBudget)} vs budget</div>
-        </div>
-      </div>
-
-      {/* Bar chart card */}
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Annual Budget vs Year-End Forecast by Category</div>
-            <div className="card-sub">Sorted by Annual Budget · descending</div>
-          </div>
-          <div className="flex gap-3 fs-tiny text-stone">
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#333C66',display:'inline-block'}}/>annual budget</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#6699FF',display:'inline-block'}}/>year-end forecast</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'var(--risk-red)',display:'inline-block'}}/>over budget</span>
-          </div>
-        </div>
-        <div>
-          {display.map(r => {
-            const bw = (r.budget / max) * 100;
-            const fw = (r.yef / max) * 100;
-            const over = r.yef > r.budget;
-            return (
-              <div key={r.name} style={{display:'grid', gridTemplateColumns:'220px 1fr 240px', gap:14, alignItems:'center', padding:'10px 0', borderBottom:'1px solid var(--grid-line)'}}>
-                <div>
-                  <div style={{fontWeight:600, color:'var(--antares-signature-navy)', fontSize:13}}>{r.name}</div>
-                  <div className="fs-tiny text-stone">{r.count} line item{r.count===1?'':'s'}</div>
-                </div>
-                <div style={{display:'grid', gridTemplateRows:'1fr 1fr', gap:4}}>
-                  <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
-                    <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${bw}%`, background:'#333C66'}} />
-                    <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)', fontVariantNumeric:'tabular-nums'}}>budget</div>
-                  </div>
-                  <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
-                    <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${fw}%`, background: over ? 'var(--risk-red)' : '#6699FF'}} />
-                    <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)', fontVariantNumeric:'tabular-nums'}}>forecast</div>
-                  </div>
-                </div>
-                <div className="text-right tabular fs-small" style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6}}>
-                  <span style={{color:'var(--antares-signature-navy)', fontWeight:600}}>{fmt.k(r.budget)}</span>
-                  <span style={{color: over ? 'var(--risk-red)' : 'var(--antares-bright-blue-600)', fontWeight:600}}>{fmt.k(r.yef)}</span>
-                  <span style={{color: over ? 'var(--risk-red)' : 'var(--opp-green)', fontWeight:600}}>{fmt.signed(r.yef - r.budget)}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="flex justify-between fs-tiny text-stone mt-3" style={{borderTop:'1px solid var(--grid-line)', paddingTop: 8}}>
-          <span>annual budget · year-end forecast · variance</span>
-          <span>total: {fmt.m(totalBudget)} → {fmt.m(totalYef)} ({fmt.signed(totalYef - totalBudget)})</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-window.CategoryTab = CategoryTab;
+<script type="text/babel" src="helpers.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="filter-bar.jsx"></script>
+<script type="text/babel" src="tab-sunburst.jsx"></script>
+<script type="text/babel" src="drill-panels.jsx"></script>
+<script type="text/babel" src="tab-category-wf.jsx"></script>
+<script type="text/babel" src="tab-overview.jsx"></script>
+<script type="text/babel" src="tab-vendors.jsx"></script>
+<script type="text/babel" src="tab-category.jsx"></script>
+<script type="text/babel" src="tab-owners-and-log.jsx"></script>
+<script type="text/babel" src="tab-user-guide.jsx"></script>
+<script type="text/babel" src="tab-upload.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

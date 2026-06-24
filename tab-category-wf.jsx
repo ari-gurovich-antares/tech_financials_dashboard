@@ -1,536 +1,484 @@
-// tab-category-wf.jsx — Category waterfall drilldown panel
-// Opens when user clicks "Waterfall View" on a selected category in the Drivers chart.
-// Level 1: Category Budget → Vendor variance steps → Category Forecast
-// Level 2: (click a vendor bar) Vendor Budget → Contract steps → Vendor Forecast
+// Parse a 2026 Tech Financials Excel workbook into the same shape as data/financials.json.
+// Uses SheetJS (loaded via <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.full.min.js">)
+//
+// Returns: { summary, vendors, domainOwners, riskOppLog, lineItems, lookups, _rowCount, _excludedCount }
+// or throws an Error with a friendly message.
 
-const { useState: useStateCWF, useMemo: useMemoCWF } = React;
+(function () {
+  // Column header → field. Headers appear in row 0 of "Master Data (DO NOT EDIT)".
+  const HEADERS = {
+    'Transaction Type': 'transactionType',
+    'D365 Legal Vendor name': 'vendor',
+    'DBA / AKA / Passthrough': 'vendorDba',
+    'Project ID': 'projectId',
+    'Project Name': 'project',
+    'Domain': 'domain',
+    'Domain Owner': 'owner',
+    'Application': 'application',
+    'Project Details': 'projectDetails',
+    'Category': 'category',
+    'Sub-Category1': 'subCategory',
+    'Contract Type': 'contractType',
+    'MGMT View Category (OneStream)': 'onestreamCategory',
+    'Accounting Treatment': 'treatment',
+    '2026 Final Budget': 'budget',
+    '2026 (Actuals + Forecast)': 'forecast',
+    '2026 Opportunity': 'opp',
+    '2026 Risk': 'risk',
+    '2026 Net Position': 'net',
+    'Notes': 'notes',
+    'Total Actuals': 'actual',
+  };
 
-// mirrors ovCat / v3Cat
-function cwfCat(li) {
-  if ((li.category || '').toLowerCase() === 'amortization') return 'Amortization';
-  return li.subCategory || '(Other)';
-}
+  const MONTHS_AC = ['Jan AC','Feb AC','Mar AC','Apr AC','May AC','Jun AC','Jul AC','Aug AC','Sep AC','Oct AC','Nov AC','Dec AC'];
+  const MONTHS_FC = ['Jan FC','Feb FC','Mar FC','Apr FC','May FC','Jun FC','Jul FC','Aug FC','Sep FC','Oct FC','Nov FC','Dec FC'];
+  const MONTHS_OR = ['Jan Opp/Risk','Feb Opp./Risk','Mar Opp./Risk','Apr Opp./Risk','May Opp./Risk','Jun Opp./Risk','Jul Opp./Risk','Aug Opp./Risk','Sep Opp./Risk','Oct Opp./Risk','Nov Opp./Risk','Dec Opp./Risk'];
+  // Some files may have different punctuation; try a tolerant fallback for OR.
+  const MONTHS_OR_ALT = ['Jan Opp./Risk','Feb Opp/Risk','Mar Opp/Risk','Apr Opp/Risk','May Opp/Risk','Jun Opp/Risk','Jul Opp/Risk','Aug Opp/Risk','Sep Opp/Risk','Oct Opp/Risk','Nov Opp/Risk','Dec Opp/Risk'];
 
-// ── Waterfall SVG ─────────────────────────────────────────────────────────
-// totalBudget / totalForecast — the start and end anchor bars
-// steps — [{ label, variance, from, to, drillable }]
-// sel   — currently selected step label (for ring highlight)
-// onSelect — fn(label | null) called on bar click
-function CWFWaterfallSVG({ totalBudget, totalForecast, steps, sel, onSelect }) {
-  const [hov, setHov] = useStateCWF(null);
+  const num = (v) => {
+    if (v === null || v === undefined || v === '') return 0;
+    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[, ]/g, ''));
+    return isNaN(n) ? 0 : n;
+  };
+  const str = (v) => v === null || v === undefined ? '' : String(v).trim();
 
-  if (!steps || steps.length === 0) return null;
-  const N = steps.length;
+  function findHeaderRow(rows) {
+    for (let r = 0; r < Math.min(rows.length, 5); r++) {
+      const row = rows[r] || [];
+      if (row.includes('Transaction Type') && row.includes('D365 Legal Vendor name')) return r;
+    }
+    throw new Error('Could not find header row. Expected a row with "Transaction Type" and "D365 Legal Vendor name".');
+  }
 
-  // ── Y scale ───────────────────────────────────────────────────────────
-  const allVals = [
-    totalBudget, totalForecast,
-    ...steps.map(s => s.from), ...steps.map(s => s.to),
-  ];
-  const rawMin = Math.min(...allVals);
-  const rawMax = Math.max(...allVals);
-  const spread = Math.max(rawMax - rawMin, Math.abs(totalBudget) * 0.005, 1);
-  const floorV = rawMin - spread * 1.3;
-  const ceilV  = rawMax + spread * 0.65;
-  const vRange = Math.max(ceilV - floorV, 1);
+  function buildColIndex(headerRow) {
+    const idx = {};
+    headerRow.forEach((h, i) => {
+      const key = str(h);
+      if (key) idx[key] = i;
+    });
+    return idx;
+  }
 
-  // ── SVG geometry ──────────────────────────────────────────────────────
-  const VW = 900, VH = 300;
-  const CT = 62, CB = 68;
-  const CH = VH - CT - CB;
-  const AXIS_Y = CT + CH;
-  const CL = 18, CR = 882;
+  function readArr(row, colIdx, names) {
+    const out = new Array(12).fill(0);
+    for (let i = 0; i < 12; i++) {
+      const ci = colIdx[names[i]];
+      if (ci != null) out[i] = num(row[ci]);
+    }
+    return out;
+  }
 
-  // Bar widths: Budget/Forecast fixed at BW; steps sized to fill remaining space
-  const BW = 78;
-  const AVAIL = CR - CL - 2 * BW;
-  const CW    = Math.max(28, Math.min(68, Math.floor(AVAIL / (N * 1.6))));
-  const GAP   = Math.max(4, (AVAIL - N * CW) / (N + 1));
-  const stepX = i => CL + BW + (i + 1) * GAP + i * CW;
-  const fcX   = CL + BW + (N + 1) * GAP + N * CW;
+  function parseExcelArrayBuffer(arrayBuffer) {
+    if (typeof XLSX === 'undefined') {
+      throw new Error('SheetJS (XLSX) library not loaded. Check <script> tag.');
+    }
+    const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array', cellFormula: true });
+    let sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('master data'));
+    if (!sheetName) {
+      throw new Error(
+        `Sheet "Master Data (DO NOT EDIT)" not found. Found sheets: ${wb.SheetNames.join(', ')}`
+      );
+    }
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+    if (!rows.length) throw new Error('Master Data sheet is empty.');
 
-  const scY = v => CT + CH * (1 - (v - floorV) / vRange);
+    const headerRowIdx = findHeaderRow(rows);
+    const colIdx = buildColIndex(rows[headerRowIdx]);
 
-  // Largest driver badges
-  const maxUnfav = steps.filter(s => s.variance > 0).reduce((m, s) => Math.max(m, s.variance), -Infinity);
-  const minFav   = steps.filter(s => s.variance < 0).reduce((m, s) => Math.min(m, s.variance), Infinity);
+    // Sanity: required columns
+    const required = ['Transaction Type', 'D365 Legal Vendor name', '2026 Final Budget', 'Total Actuals'];
+    const missing = required.filter(h => !(h in colIdx));
+    if (missing.length) throw new Error(`Missing columns in Master Data: ${missing.join(', ')}`);
 
-  const totalVar = totalForecast - totalBudget;
-  const totFav   = totalVar <= 0;
-  const FCC      = totFav ? '#2F7A4D' : '#B23A3A';
-  const varPct   = Math.abs(totalBudget) > 0 ? Math.abs(totalVar / totalBudget * 100).toFixed(1) : '0.0';
+    // Resolve OR header set — some files use one variant, some the other. Build a tolerant resolver.
+    const resolvedOR = MONTHS_OR.map((m, i) => {
+      if (m in colIdx) return m;
+      if (MONTHS_OR_ALT[i] in colIdx) return MONTHS_OR_ALT[i];
+      // Last-ditch: find any header starting with month abbrev + "Opp"
+      const abbrev = m.slice(0, 3);
+      const found = Object.keys(colIdx).find(k => k.startsWith(abbrev) && /Opp/.test(k));
+      return found || m; // may end up missing → array will have 0
+    });
 
-  const truncLabel = (s, n) => s.length > n ? s.slice(0, n - 1) + '\u2026' : s;
+    // ════════════════════════════════════════════════════════════════════════
+    // ROW INCLUSION RULE
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    // The dashboard dataset is scoped to exactly the same rows as the
+    // workbook SUBTOTAL formula found in the Master Data sheet.
+    //
+    // How it works (automatic, no hardcoded row numbers):
+    //
+    //   1. Pre-scan: locate the SUBTOTAL summary row (identified by having no
+    //      Transaction Type, no Category, and no Sub-Category).
+    //
+    //   2. Read the formula stored in its Budget cell, e.g.:
+    //        =SUBTOTAL(9, V2:V140)
+    //      Extract the upper bound of the range (140 in this example).
+    //
+    //   3. Restrict all data processing to Excel rows within that range.
+    //      Any row whose Excel row number exceeds the upper bound is excluded.
+    //
+    //   4. Read the SUBTOTAL cell values as the authoritative KPI totals
+    //      (stored as workbookSubtotal). These are used directly for all
+    //      headline KPI cards when no filters are active, guaranteeing that
+    //      Dashboard values = Workbook SUBTOTAL values.
+    //
+    // Why this matters:
+    //   The workbook may contain rows AFTER the SUBTOTAL formula range
+    //   (e.g. adjustment rows, draft entries, reconciling items) that the
+    //   Finance team intentionally excluded from reporting. By scoping to
+    //   the formula range, the dashboard automatically mirrors the same
+    //   boundary the analyst set in the workbook.
+    //
+    // If the workbook changes:
+    //   • Rows added WITHIN the formula range (e.g. V2:V141) → included.
+    //   • SUBTOTAL formula range extended (e.g. V2:V155) → dashboard extends.
+    //   • SUBTOTAL formula range shrunk → dashboard shrinks.
+    //   No code change required.
+    //
+    // Fallback (if formula string is unavailable):
+    //   Accumulate the budget column row-by-row until the running total
+    //   matches workbookSubtotal.budget (within $1). The row where the match
+    //   occurs is used as the upper bound. This handles cases where the
+    //   Excel file stores only the computed value, not the formula string.
+    // ════════════════════════════════════════════════════════════════════════
 
-  return (
-    <svg width="100%" viewBox={`0 0 ${VW} ${VH}`} style={{ display: 'block' }}>
+    // subtotalRangeEnd: the last Excel row number covered by the SUBTOTAL formula.
+    // null means no SUBTOTAL row was found; all rows will be processed.
+    let subtotalRangeEnd = null;
+    let workbookSubtotal = null;  // Authoritative KPI values from the SUBTOTAL row
 
-      {/* Grid lines */}
-      {[0.33, 0.67].map(t => (
-        <line key={t} x1={CL} y1={CT + CH * t} x2={CR} y2={CT + CH * t}
-          stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-      ))}
+    // subtotalRowIdx: SheetJS row index of the SUBTOTAL row.
+    // Used in Step 3 to avoid double-counting the SUBTOTAL row's formula value.
+    let subtotalRowIdx = -1;
 
-      {/* Axis */}
-      <line x1={CL - 4} y1={AXIS_Y} x2={CR + 4} y2={AXIS_Y}
-        stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
+    // ── STEP 1: Pre-scan — locate SUBTOTAL row and read its formula ──────
+    for (let ps = headerRowIdx + 1; ps < rows.length; ps++) {
+      const psRow = rows[ps];
+      if (!psRow || psRow.every(v => v === null || v === '' || v === undefined)) continue;
 
-      {/* ── Budget bar ── */}
-      {(() => {
-        const bY = scY(totalBudget);
-        const bH = AXIS_Y - bY;
-        const cx = CL + BW / 2;
-        return (
-          <g>
-            <rect x={CL} y={bY} width={BW} height={bH} fill="#3D4F80" rx="1" />
-            <text x={cx} y={bY - 24} textAnchor="middle"
-              fill="rgba(255,255,255,0.38)" fontFamily="'Inter',sans-serif"
-              fontWeight="700" fontSize="8" letterSpacing="0.12em">BUDGET</text>
-            <text x={cx} y={bY - 8} textAnchor="middle"
-              fill="rgba(255,255,255,0.92)" fontFamily="'Source Serif 4',Georgia,serif"
-              fontWeight="700" fontSize="13" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {fmt.m(totalBudget)}
-            </text>
-            <text x={cx} y={AXIS_Y + 17} textAnchor="middle"
-              fill="rgba(255,255,255,0.42)" fontFamily="'Inter',sans-serif"
-              fontSize="11" fontWeight="600">Budget</text>
-            <line x1={CL + BW} y1={bY} x2={stepX(0)} y2={bY}
-              stroke="rgba(255,255,255,0.16)" strokeWidth="1" strokeDasharray="4 3" />
-          </g>
-        );
-      })()}
+      const psTx  = str(psRow[colIdx['Transaction Type']]);
+      const psCat = str(psRow[colIdx['Category']]);
+      const psSub = str(psRow[colIdx['Sub-Category1']]);
 
-      {/* ── Step bars ── */}
-      {steps.map((step, i) => {
-        const isNeut        = Math.abs(step.variance) < 500;
-        const isFav         = step.variance < 0;
-        const color         = isNeut ? 'rgba(255,255,255,0.2)' : isFav ? '#2F7A4D' : '#B23A3A';
-        const isSel         = sel === step.label;
-        const isHov         = hov === step.label;
-        const isLargestUF   = step.variance > 0 && step.variance === maxUnfav;
-        const isLargestFav  = step.variance < 0 && step.variance === minFav;
-        const hasBadge      = (isLargestUF || isLargestFav) && !isNeut;
-        const cx            = stepX(i) + CW / 2;
+      // SUBTOTAL row has no Transaction Type, no Category, and no Sub-Category
+      if (!psTx && !psCat && !psSub) {
 
-        const hiVal  = Math.max(step.from, step.to);
-        const loVal  = Math.min(step.from, step.to);
-        const topY   = scY(hiVal);
-        const botY   = scY(loVal);
-        const stepH  = Math.max(botY - topY, 2);
-        const connY  = scY(step.to);
-        const nextX  = i < N - 1 ? stepX(i + 1) : fcX;
-        const maxCh  = Math.max(5, Math.floor(CW / 6.8));
-        const lbl    = truncLabel(step.label, maxCh);
+        subtotalRowIdx = ps; // Save for main loop exclusion guard
 
-        return (
-          <g key={`step-${i}`}
-            onClick={() => step.drillable && onSelect && onSelect(isSel ? null : step.label)}
-            onMouseEnter={() => step.drillable && setHov(step.label)}
-            onMouseLeave={() => setHov(null)}
-            style={{ cursor: step.drillable ? 'pointer' : 'default' }}>
+        // ── Capture authoritative KPI totals from the SUBTOTAL row ──────
+        workbookSubtotal = {
+          budget:   num(psRow[colIdx['2026 Final Budget']]),
+          forecast: num(psRow[colIdx['2026 (Actuals + Forecast)']]),
+          actual:   num(psRow[colIdx['Total Actuals']]),
+          risk:     num(psRow[colIdx['2026 Risk']]),
+          opp:      num(psRow[colIdx['2026 Opportunity']]),
+          net:      num(psRow[colIdx['2026 Net Position']]),
+        };
+        workbookSubtotal.absOpp    = Math.abs(workbookSubtotal.opp);
+        workbookSubtotal.remaining = workbookSubtotal.forecast - workbookSubtotal.actual;
 
-            {/* Transparent hit area */}
-            <rect x={stepX(i) - 4} y={Math.min(topY - 36, AXIS_Y - stepH - 36)}
-              width={CW + 8}
-              height={AXIS_Y - Math.min(topY - 36, AXIS_Y - stepH - 36) + 4}
-              fill="transparent" />
+        // ── Extract formula range end from the SUBTOTAL cell ────────────
+        // The Budget column cell should contain e.g. =SUBTOTAL(9,V2:V140).
+        // We parse the upper-bound row number from that formula string.
+        const budCellAddr = XLSX.utils.encode_cell({ r: ps, c: colIdx['2026 Final Budget'] });
+        const budCell     = ws[budCellAddr];
+        if (budCell && budCell.f) {
+          // Match the end of a range reference like ":V140)" or ":AB140,"
+          const rangeMatch = budCell.f.match(/:[A-Z]+(\d+)\s*[),]/);
+          if (rangeMatch) {
+            subtotalRangeEnd = parseInt(rangeMatch[1], 10);
+          }
+        }
 
-            {/* Hover / select glow ring */}
-            {(isSel || isHov) && !isNeut && (
-              <rect x={stepX(i) - 2} y={topY - 2} width={CW + 4} height={stepH + 4} rx="2"
-                fill="none" stroke={color} strokeWidth="1.5" opacity="0.65" />
-            )}
+        break; // Only the first SUBTOTAL row is used
+      }
+    }
 
-            {/* Bar */}
-            <rect x={stepX(i)} y={topY} width={CW} height={stepH} rx="1"
-              fill={color}
-              opacity={isNeut ? 0.28 : (isSel || isHov) ? 1 : 0.8}
-              style={{ transition: 'opacity 0.12s' }} />
+    // ── STEP 2: Fallback — derive range end via budget-sum matching ──────
+    // Used when the XLSX file stores only computed values, not formula strings.
+    if (!subtotalRangeEnd && workbookSubtotal) {
+      const targetBudget = workbookSubtotal.budget; // = SUM of all rows in SUBTOTAL range
+      let cumBudget = 0;
+      for (let ri = headerRowIdx + 1; ri < rows.length; ri++) {
+        const rrow = rows[ri];
+        if (!rrow || rrow.every(v => v === null || v === '')) continue;
+        const rtx  = str(rrow[colIdx['Transaction Type']]);
+        const rcat = str(rrow[colIdx['Category']]);
+        const rsub = str(rrow[colIdx['Sub-Category1']]);
+        if (!rtx && !rcat && !rsub) break; // Reached SUBTOTAL row — stop
+        cumBudget += num(rrow[colIdx['2026 Final Budget']]);
+        // When the running total matches the SUBTOTAL budget (within $1 for float rounding),
+        // the current row is the last row in the SUBTOTAL range.
+        if (Math.abs(cumBudget - targetBudget) < 1) {
+          subtotalRangeEnd = ri + 1; // Convert 0-based SheetJS index to 1-based Excel row
+          break;
+        }
+      }
+    }
 
-            {/* Badge pill */}
-            {hasBadge && (
-              <g>
-                <rect x={stepX(i) + 2} y={topY - 19} width={CW - 4} height={12} rx="2"
-                  fill={color} opacity="0.18" />
-                <text x={cx} y={topY - 10} textAnchor="middle"
-                  fill={color} fontFamily="'Inter',sans-serif" fontWeight="800" fontSize="7" letterSpacing="0.1em">
-                  {isFav ? '\u2193 LARGEST OFFSET' : '\u2191 LARGEST DRIVER'}
-                </text>
-              </g>
-            )}
+    // ── STEP 3: Main data loop — process only rows within the SUBTOTAL range ─
+    const lineItems = [];
+    let rowCount = 0;
+    let excludedCount = 0;
+    // Track totals for ALL rows excluded within the SUBTOTAL range (any exclusion
+    // reason: Capitalization type, no vendor/project, summary rows).
+    // This covers every path that removes a row from lineItems but leaves it in the
+    // SUBTOTAL formula — regardless of which field or rule triggered the exclusion.
+    // NOTE: the SUBTOTAL row itself (subtotalRowIdx) is always skipped.
+    let exclBudget = 0, exclForecast = 0, exclActual = 0, exclRisk = 0, exclOpp = 0, exclNet = 0;
+    const capRowLog = []; // diagnostic: rows excluded as Capitalization
+    for (let r = headerRowIdx + 1; r < rows.length; r++) {
 
-            {/* Value label */}
-            {!isNeut && (
-              <text x={cx} y={topY - (hasBadge ? 24 : 8)} textAnchor="middle"
-                fill={color} fontFamily="'Source Serif 4',Georgia,serif" fontWeight="700" fontSize="12"
-                style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {isFav ? '\u2212' : '+'}{fmt.k(Math.abs(step.variance))}
-              </text>
-            )}
+      // Convert SheetJS 0-based row index to 1-based Excel row number
+      const excelRowNum = r + 1;
 
-            {/* Name label */}
-            <text x={cx} y={AXIS_Y + 17} textAnchor="middle"
-              fill={isSel ? '#fff' : 'rgba(255,255,255,0.48)'}
-              fontFamily="'Inter',sans-serif" fontWeight={isSel ? 600 : 400} fontSize="10">
-              {lbl}
-            </text>
+      // ── ROW INCLUSION GATE ──────────────────────────────────────────────
+      // If a SUBTOTAL range was found, skip any row beyond its upper bound.
+      // This ensures the dataset matches the SUBTOTAL formula range exactly.
+      // Example: if subtotalRangeEnd = 140, rows 141+ are excluded.
+      if (subtotalRangeEnd && excelRowNum > subtotalRangeEnd) {
+        excludedCount++;
+        continue;
+      }
+      const row = rows[r];
+      if (!row || row.every(v => v === null || v === '' || v === undefined)) continue;
 
-            {/* Drill hint arrow */}
-            {step.drillable && (
-              <text x={cx} y={AXIS_Y + 29} textAnchor="middle"
-                fill={isSel ? '#fff' : color} fontFamily="'Inter',sans-serif"
-                fontSize="8" opacity={isSel || isHov ? 0.9 : 0.4}>
-                {isSel ? '\u25b2' : '\u25be'}
-              </text>
-            )}
+      // Build base record
+      const rec = {};
+      for (const [hdr, fld] of Object.entries(HEADERS)) {
+        const ci = colIdx[hdr];
+        rec[fld] = ci != null ? row[ci] : null;
+      }
 
-            {/* Connector dashes to next bar */}
-            <line x1={stepX(i) + CW} y1={connY} x2={nextX} y2={connY}
-              stroke="rgba(255,255,255,0.15)" strokeWidth="1" strokeDasharray="4 3" />
-          </g>
-        );
-      })}
+      const tx = str(rec.transactionType);
+      // Pre-read financial values — used for exclusion tracking and lineItem building.
+      // Inlined at each exclusion path (no helper function — avoids Babel hoisting issues
+      // with function declarations inside for-loop blocks).
+      const _rB = num(rec.budget), _rF = num(rec.forecast), _rA = num(rec.actual),
+            _rR = num(rec.risk),   _rO = num(rec.opp),      _rN = num(rec.net);
+      // ── Exclusion path A: Capitalization transaction type ─────────────
+      if (tx.toLowerCase() === 'capitalization') {
+        if (r !== subtotalRowIdx) {
+          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
+          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
+        }
+        capRowLog.push({ excelRow: excelRowNum, budget:_rB, forecast:_rF, actual:_rA, risk:_rR, opp:_rO, net:_rN, reason:'cap-tx' });
+        excludedCount++;
+        continue;
+      }
+      // ── Exclusion path B: no vendor AND no project ────────────────────
+      if (!str(rec.vendor) && !str(rec.project)) {
+        if (r !== subtotalRowIdx) {
+          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
+          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
+        }
+        capRowLog.push({ excelRow: excelRowNum, budget:_rB, forecast:_rF, actual:_rA, risk:_rR, opp:_rO, net:_rN, reason:'no-vendor-project', tx });
+        continue;
+      }
+      // ── Exclusion path C: summary/subtotal rows (no tx, no cat, no subcat) ──
+      const recCat    = str(rec.category);
+      const recSubCat = str(rec.subCategory);
+      if (!tx && !recCat && !recSubCat) {
+        if (r !== subtotalRowIdx) {
+          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
+          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
+        }
+        excludedCount++;
+        continue;
+      }
 
-      {/* ── Forecast bar ── */}
-      {(() => {
-        const fY = scY(totalForecast);
-        const fH = AXIS_Y - fY;
-        const cx = fcX + BW / 2;
-        return (
-          <g>
-            <rect x={fcX} y={fY} width={BW} height={fH} fill={FCC} rx="1" opacity="0.88" />
-            <text x={cx} y={fY - 26} textAnchor="middle"
-              fill={FCC} fontFamily="'Inter',sans-serif" fontWeight="700" fontSize="8" letterSpacing="0.1em">
-              {totFav ? '\u25b2 FAV' : '\u25bc UNFAV'}{'\u2002'}{totFav ? '\u2212' : '+'}{varPct}%
-            </text>
-            <text x={cx} y={fY - 8} textAnchor="middle"
-              fill={FCC} fontFamily="'Source Serif 4',Georgia,serif" fontWeight="700" fontSize="13"
-              style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {fmt.m(totalForecast)}
-            </text>
-            <text x={cx} y={AXIS_Y + 17} textAnchor="middle"
-              fill={FCC} fontFamily="'Inter',sans-serif" fontWeight="600" fontSize="11">
-              Forecast
-            </text>
-          </g>
-        );
-      })()}
+      const lineItem = {
+        vendor: str(rec.vendor) || '',
+        domain: str(rec.domain) || '',
+        owner: str(rec.owner) || 'N/A',
+        category: str(rec.category) || '',
+        project: str(rec.project) || '',
+        application: str(rec.application) || '',
+        subCategory: str(rec.subCategory) || '',
+        treatment: str(rec.treatment) || '',
+        budget: num(rec.budget),
+        actual: num(rec.actual),
+        forecast: num(rec.forecast),
+        risk: num(rec.risk),
+        opp: num(rec.opp),
+        net: num(rec.net),
+        notes: str(rec.notes) || '',
+        monthlyAC: readArr(row, colIdx, MONTHS_AC),
+        monthlyFC: readArr(row, colIdx, MONTHS_FC),
+        monthlyOR: readArr(row, colIdx, resolvedOR),
+        onestreamCategory: str(rec.onestreamCategory) || '',
+      };
+      lineItems.push(lineItem);
+      rowCount++;
+    }
 
-      {/* Reconciliation note */}
-      <text x={VW / 2} y={VH - 4} textAnchor="middle"
-        fill="rgba(255,255,255,0.15)" fontFamily="'Inter',sans-serif" fontSize="9">
-        {`Budget ${fmt.m(totalBudget)} ${totFav ? '\u2212' : '+'} ${fmt.m(Math.abs(totalVar))} = Forecast ${fmt.m(totalForecast)}`}
-      </text>
-    </svg>
-  );
-}
+    // ── Adjust workbookSubtotal to exclude Capitalization rows ─────────────
+    // Cap exclusion accounting complete — adjustment applied conditionally below
+    // Adjust workbookSubtotal only when it differs from lineItems sums.
+    //
+    // Two cases handled:
+    //  a) Workbook saved WITH filter ON:  SUBTOTAL cached value already excludes Cap →
+    //     raw SUBTOTAL == lineItems sum → no adjustment needed, reconciliation passes.
+    //  b) Workbook saved WITHOUT filter:  SUBTOTAL includes Cap row amounts →
+    //     raw SUBTOTAL != lineItems sum → subtract excluded amounts to align them.
+    //
+    // Without this guard, subtracting a negative Cap budget (credit entry) would
+    // ADD to the SUBTOTAL instead of reducing it, breaking reconciliation.
+    if (workbookSubtotal) {
+      let _lb = 0, _lf = 0, _la = 0;
+      for (const li of lineItems) { _lb += li.budget||0; _lf += li.forecast||0; _la += li.actual||0; }
+      const _rawBudget = workbookSubtotal.budget;
+      const needsAdj = Math.abs(workbookSubtotal.budget   - _lb) > 1 ||
+                       Math.abs(workbookSubtotal.forecast - _lf) > 1 ||
+                       Math.abs(workbookSubtotal.actual   - _la) > 1;
+      if (needsAdj) {
+        const adjForecast = workbookSubtotal.forecast - exclForecast;
+        const adjActual   = workbookSubtotal.actual   - exclActual;
+        workbookSubtotal = {
+          budget:    workbookSubtotal.budget   - exclBudget,
+          forecast:  adjForecast,
+          actual:    adjActual,
+          remaining: adjForecast - adjActual,
+          risk:      workbookSubtotal.risk     - exclRisk,
+          opp:       workbookSubtotal.opp      - exclOpp,
+          net:       workbookSubtotal.net      - exclNet,
+          absOpp:    Math.abs(workbookSubtotal.opp - exclOpp),
+        };
 
-// ── CategoryWaterfallPanel ─────────────────────────────────────────────────
-function CategoryWaterfallPanel({ cat, lineItems, onClose }) {
-  const [selVendor, setSelVendor] = useStateCWF(null);
-  const MAX_STEPS = 8;
+      } else {
+      console.log('[parse] Cap exclusion:', capRowLog.length, 'row(s) excluded, exclBudget=', Math.round(exclBudget/1000) + 'K, adjustment needed=', needsAdj);
+      }
+    }
 
-  // ── Derive all data from lineItems filtered to this category ────────────
-  const derived = useMemoCWF(() => {
-    const catItems = lineItems.filter(li => cwfCat(li) === cat);
-    const catBudget   = catItems.reduce((s, li) => s + (li.budget   || 0), 0);
-    const catForecast = catItems.reduce((s, li) => s + (li.forecast || 0), 0);
+    if (!lineItems.length) {
+      throw new Error('No data rows parsed. Check that the Master Data sheet has rows below the header.');
+    }
 
-    // Build vendor map
-    const vm = {};
-    for (const li of catItems) {
-      const v = li.vendor || '(unspecified)';
-      if (!vm[v]) vm[v] = { name: v, budget: 0, forecast: 0, contracts: [] };
-      vm[v].budget   += li.budget   || 0;
-      vm[v].forecast += li.forecast || 0;
-      const appPfx = li.application && li.application !== 'N/A' && li.application.trim()
-        ? li.application + ' \u2014 ' : '';
-      const cName = (appPfx + (li.project || '')).trim().slice(0, 80) || v;
-      vm[v].contracts.push({
-        name:     cName,
-        budget:   li.budget   || 0,
-        forecast: li.forecast || 0,
-        notes:    li.notes    || '',
+    const _result = buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd);
+
+    // Read-only SharePoint/backup copies can contain stale cached formula results.
+    // SheetJS reads cached formula values but does not recalculate formulas, so do
+    // not use the SUBTOTAL row's cached values for KPI cards. Keep the SUBTOTAL
+    // formula range for row scoping, but derive headline totals from parsed rows.
+    _result.workbookSubtotal = {
+      budget: _result.summary.budget,
+      actual: _result.summary.actual,
+      forecast: _result.summary.forecast,
+      remaining: _result.summary.remaining,
+      risk: _result.summary.risk,
+      opp: _result.summary.opp,
+      net: _result.summary.net,
+      absOpp: Math.abs(_result.summary.opp),
+    };
+
+    const _s = _result.summary;
+    const _ws = _result.workbookSubtotal;
+    if (_ws) {
+      console.log('Adjusted subtotal === line items?', {
+        budget:   Math.abs(_ws.budget   - _s.budget)   < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.budget   - _s.budget).toFixed(2),
+        forecast: Math.abs(_ws.forecast - _s.forecast) < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.forecast - _s.forecast).toFixed(2),
+        risk:     Math.abs(_ws.risk     - _s.risk)     < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.risk     - _s.risk).toFixed(2),
+        opp:      Math.abs(_ws.absOpp   - Math.abs(_s.opp)) < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.absOpp - Math.abs(_s.opp)).toFixed(2),
+        net:      Math.abs(_ws.net      - _s.net)      < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.net      - _s.net).toFixed(2),
       });
     }
-    const vendorMap = Object.values(vm)
-      .map(v => ({ ...v, variance: v.forecast - v.budget }))
-      .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+    return _result;
+  }
 
-    // Build category-level waterfall steps from top vendors
-    const topVendors = vendorMap.filter(v => Math.abs(v.variance) >= 500).slice(0, MAX_STEPS);
-    const restVariance = vendorMap.reduce((s, v) => s + v.variance, 0)
-                       - topVendors.reduce((s, v) => s + v.variance, 0);
-    const restBudget   = catBudget   - topVendors.reduce((s, v) => s + v.budget,   0);
-    const restForecast = catForecast - topVendors.reduce((s, v) => s + v.forecast, 0);
-    const wfVendors = Math.abs(restVariance) >= 500
-      ? [...topVendors, { name: 'Other / minor', budget: restBudget, forecast: restForecast, variance: restVariance, contracts: [] }]
-      : topVendors;
+  function uniq(arr) { return [...new Set(arr.filter(x => x !== '' && x != null))].sort(); }
 
-    let running = catBudget;
-    const catSteps = wfVendors.map(v => {
-      const from = running;
-      const to   = running + v.variance;
-      running    = to;
-      return { label: v.name, variance: v.variance, from, to,
-               drillable: v.name !== 'Other / minor' && v.contracts.length > 0 };
-    });
+  function buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd) {
+    // Summary
+    const summary = lineItems.reduce((s, x) => ({
+      budget: s.budget + x.budget,
+      actual: s.actual + x.actual,
+      forecast: s.forecast + x.forecast,
+      risk: s.risk + x.risk,
+      opp: s.opp + x.opp,
+      net: s.net + x.net,
+    }), {budget:0, actual:0, forecast:0, risk:0, opp:0, net:0});
+    summary.remaining = summary.forecast - summary.actual;
+    summary.rowCount = rowCount;
+    summary.excludedCount = excludedCount;
 
-    return { catBudget, catForecast, catVariance: catForecast - catBudget, vendorMap, catSteps };
-  }, [lineItems, cat]);
+    // Aggregate by vendor
+    const byV = {};
+    for (const li of lineItems) {
+      const k = li.vendor || '(unspecified)';
+      if (!byV[k]) byV[k] = {
+        vendor: k, budget:0, actual:0, forecast:0, risk:0, opp:0, net:0,
+        domains: new Set(), domainOwners: new Set(),
+        monthlyAC: new Array(12).fill(0), monthlyFC: new Array(12).fill(0),
+        lineItems: []
+      };
+      const b = byV[k];
+      b.budget += li.budget; b.actual += li.actual; b.forecast += li.forecast;
+      b.risk += li.risk; b.opp += li.opp; b.net += li.net;
+      if (li.domain) b.domains.add(li.domain);
+      if (li.owner) b.domainOwners.add(li.owner);
+      li.monthlyAC.forEach((v,i)=>{ b.monthlyAC[i]+=v; });
+      li.monthlyFC.forEach((v,i)=>{ b.monthlyFC[i]+=v; });
+      b.lineItems.push(li);
+    }
+    const vendors = Object.values(byV)
+      .map(v => ({ ...v, domains: [...v.domains], domainOwners: [...v.domainOwners] }))
+      .sort((a, b) => b.actual - a.actual);
 
-  const { catBudget, catForecast, catVariance, vendorMap, catSteps } = derived;
-  const catFav    = catVariance <= 0;
-  const catVarPct = Math.abs(catBudget) > 0 ? Math.abs(catVariance / catBudget * 100).toFixed(1) : '0.0';
+    // Aggregate by domain owner
+    const byO = {};
+    for (const li of lineItems) {
+      const k = li.owner || 'N/A';
+      if (!byO[k]) byO[k] = {
+        owner: k, budget:0, actual:0, forecast:0, risk:0, opp:0, net:0,
+        vendors: new Set(), domains: new Set()
+      };
+      const o = byO[k];
+      o.budget += li.budget; o.actual += li.actual; o.forecast += li.forecast;
+      o.risk += li.risk; o.opp += li.opp; o.net += li.net;
+      if (li.vendor) o.vendors.add(li.vendor);
+      if (li.domain) o.domains.add(li.domain);
+    }
+    const domainOwners = Object.values(byO).map(o => ({
+      ...o, vendors: [...o.vendors], domains: [...o.domains]
+    }));
 
-  // ── Vendor-level data for second drill ──────────────────────────────────
-  const vendorData = selVendor ? vendorMap.find(v => v.name === selVendor) : null;
+    // R&O log = items with material risk/opp
+    const riskOppLog = lineItems
+      .filter(x => Math.abs(x.net) > 100 || Math.abs(x.risk) > 100 || Math.abs(x.opp) > 100)
+      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
 
-  const vendorSteps = useMemoCWF(() => {
-    if (!vendorData) return [];
-    const contracts = vendorData.contracts
-      .map(c => ({ ...c, variance: c.forecast - c.budget }))
-      .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
-    const top = contracts.slice(0, MAX_STEPS);
-    const restV = contracts.reduce((s, c) => s + c.variance, 0) - top.reduce((s, c) => s + c.variance, 0);
-    const restB = vendorData.budget   - top.reduce((s, c) => s + c.budget,   0);
-    const restF = vendorData.forecast - top.reduce((s, c) => s + c.forecast, 0);
-    const all = Math.abs(restV) >= 500
-      ? [...top, { name: 'Other / minor', budget: restB, forecast: restF, variance: restV, notes: '' }]
-      : top;
-    let running = vendorData.budget;
-    return all.map(c => {
-      const from = running;
-      const to   = running + c.variance;
-      running    = to;
-      return { label: c.name, variance: c.variance, from, to, drillable: false, notes: c.notes };
-    });
-  }, [vendorData, selVendor]);
+    // Lookups for filter bar
+    const lookups = {
+      domains: uniq(lineItems.map(x => x.domain)),
+      categories: uniq(lineItems.map(x => x.category)),
+      subCategories: uniq(lineItems.map(x => x.subCategory)),
+      onestreamCategories: uniq(lineItems.map(x => x.onestreamCategory)),
+      vendors: uniq(lineItems.map(x => x.vendor)),
+      owners: uniq(lineItems.map(x => x.owner)),
+    };
 
-  const accent = catFav ? '#72D4A0' : '#E87878';
+    return {
+      summary, vendors, domainOwners, riskOppLog, lineItems, lookups, workbookSubtotal,
+      // rowScope: documents the row range used for all calculations.
+      // "auto" = formula was read from the SUBTOTAL cell; "fallback" = budget-sum matching.
+      // "none" = no SUBTOTAL row found; all rows processed.
+      rowScope: {
+        source: subtotalRangeEnd ? (workbookSubtotal ? 'auto' : 'fallback') : 'none',
+        maxExcelRow: subtotalRangeEnd || null,
+        rowsIncluded: rowCount,
+        rowsExcluded: (workbookSubtotal ? 1 : 0) + (subtotalRangeEnd ? 0 : 0), // SUBTOTAL + cap + out-of-range
+      },
+    };
+  }
 
-  return (
-    <div className="drill-overlay" onClick={onClose}>
-      <div className="drill-panel drill-panel-wide"
-        onClick={e => e.stopPropagation()}
-        style={{ display: 'flex', flexDirection: 'column', background: '#0E1520', overflow: 'hidden' }}>
-
-        {/* ── Header ────────────────────────────────────────────────── */}
-        <div style={{ background: '#162035', padding: '18px 24px', flexShrink: 0, position: 'relative' }}>
-          <button className="drill-close" onClick={onClose}>✕ close</button>
-
-          {/* Breadcrumb */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <span
-              onClick={() => setSelVendor(null)}
-              style={{ fontSize: 12, fontFamily: "'Inter',sans-serif",
-                color: selVendor ? 'rgba(255,255,255,0.4)' : '#fff',
-                cursor: selVendor ? 'pointer' : 'default',
-                fontWeight: selVendor ? 400 : 600 }}>
-              {cat}
-            </span>
-            {selVendor && (
-              <>
-                <span style={{ color: 'rgba(255,255,255,0.22)', fontSize: 13 }}>›</span>
-                <span style={{ fontSize: 12, color: '#fff', fontFamily: "'Inter',sans-serif", fontWeight: 600 }}>
-                  {selVendor.length > 40 ? selVendor.slice(0, 39) + '\u2026' : selVendor}
-                </span>
-              </>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ fontFamily: "'Source Serif 4',Georgia,serif", fontWeight: 600, fontSize: 22, color: '#fff' }}>
-              {selVendor
-                ? (selVendor.length > 44 ? selVendor.slice(0, 43) + '\u2026' : selVendor)
-                : `${cat} \u2014 Budget to Forecast`}
-            </div>
-            <div style={{ fontFamily: "'Source Serif 4',Georgia,serif", fontWeight: 700, fontSize: 24,
-              color: accent, fontVariantNumeric: 'tabular-nums' }}>
-              {catFav ? '\u2212' : '+'}
-              {fmt.m(Math.abs(selVendor && vendorData ? vendorData.variance : catVariance))}
-            </div>
-            <div style={{ fontSize: 11, fontFamily: "'Inter',sans-serif",
-              color: catFav ? '#72D4A0' : '#E87878', fontWeight: 600, letterSpacing: '0.06em' }}>
-              {catFav ? '\u25b2 favorable' : '\u25bc unfavorable'} · {catVarPct}%
-            </div>
-          </div>
-
-          {selVendor && (
-            <button onClick={() => setSelVendor(null)} style={{
-              marginTop: 10, padding: '4px 11px',
-              background: 'rgba(255,255,255,0.07)',
-              border: '1px solid rgba(255,255,255,0.16)',
-              color: 'rgba(255,255,255,0.65)',
-              fontSize: 11, fontFamily: "'Inter',sans-serif", cursor: 'pointer',
-            }}>← Back to {cat}</button>
-          )}
-        </div>
-
-        {/* ── Waterfall chart ───────────────────────────────────────── */}
-        <div style={{ padding: '16px 20px 4px', flexShrink: 0 }}>
-          {!selVendor ? (
-            <CWFWaterfallSVG
-              totalBudget={catBudget}
-              totalForecast={catForecast}
-              steps={catSteps}
-              sel={selVendor}
-              onSelect={label => setSelVendor(label)}
-            />
-          ) : vendorData ? (
-            <CWFWaterfallSVG
-              totalBudget={vendorData.budget}
-              totalForecast={vendorData.forecast}
-              steps={vendorSteps}
-              sel={null}
-              onSelect={null}
-            />
-          ) : null}
-        </div>
-
-        {/* ── Detail table ──────────────────────────────────────────── */}
-        <div style={{ flex: 1, overflowY: 'auto', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-
-          {/* Column header */}
-          <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 104px 104px 104px',
-            padding: '8px 24px', position: 'sticky', top: 0,
-            background: '#0E1520', zIndex: 2,
-            borderBottom: '1px solid rgba(255,255,255,0.07)',
-            fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
-            color: 'rgba(255,255,255,0.28)', fontFamily: "'Inter',sans-serif",
-          }}>
-            <span>{!selVendor ? 'Vendor' : 'Contract / Project'}</span>
-            <span style={{ textAlign: 'right' }}>Budget</span>
-            <span style={{ textAlign: 'right' }}>Forecast</span>
-            <span style={{ textAlign: 'right' }}>Variance</span>
-          </div>
-
-          {/* Rows */}
-          {!selVendor
-            ? vendorMap.map((v, i) => {
-                const vFav = v.variance < 0;
-                const vCol = vFav ? '#72D4A0' : '#E87878';
-                const canDrill = v.contracts.length > 0;
-                return (
-                  <div key={v.name}
-                    onClick={() => canDrill && setSelVendor(v.name)}
-                    style={{
-                      display: 'grid', gridTemplateColumns: '1fr 104px 104px 104px',
-                      padding: '10px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)',
-                      cursor: canDrill ? 'pointer' : 'default', transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={e => { if (canDrill) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.82)',
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
-                      {v.name}
-                      {canDrill && <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.22)', flexShrink: 0 }}>›</span>}
-                    </span>
-                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', textAlign: 'right',
-                      fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                      {fmt.m(v.budget)}
-                    </span>
-                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', textAlign: 'right',
-                      fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                      {fmt.m(v.forecast)}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: vCol, textAlign: 'right',
-                      fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                      {vFav ? '\u2212' : '+'}{fmt.k(Math.abs(v.variance))}
-                    </span>
-                  </div>
-                );
-              })
-            : vendorData
-              ? vendorData.contracts
-                  .map(c => ({ ...c, variance: c.forecast - c.budget }))
-                  .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
-                  .map((c, i) => {
-                    const cFav = c.variance < 0;
-                    const cCol = cFav ? '#72D4A0' : '#E87878';
-                    return (
-                      <div key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 104px 104px 104px',
-                          padding: '10px 24px 6px' }}>
-                          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)',
-                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            paddingRight: 10 }}>{c.name}</span>
-                          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', textAlign: 'right',
-                            fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                            {fmt.m(c.budget)}
-                          </span>
-                          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', textAlign: 'right',
-                            fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                            {fmt.m(c.forecast)}
-                          </span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: cCol, textAlign: 'right',
-                            fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                            {cFav ? '\u2212' : '+'}{fmt.k(Math.abs(c.variance))}
-                          </span>
-                        </div>
-                        {c.notes && (
-                          <div style={{ padding: '0 24px 10px 36px', fontSize: 11,
-                            color: 'rgba(255,255,255,0.26)', lineHeight: 1.55,
-                            borderLeft: `2px solid ${cFav ? 'rgba(47,122,77,0.35)' : 'rgba(178,58,58,0.35)'}`,
-                            marginLeft: 24 }}>
-                            {c.notes}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-              : null
-          }
-
-          {/* Total row */}
-          {!selVendor ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 104px 104px 104px',
-              padding: '10px 24px', borderTop: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.03)', position: 'sticky', bottom: 0 }}>
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)',
-                fontStyle: 'italic', fontFamily: "'Inter',sans-serif" }}>Total</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.65)',
-                textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                {fmt.m(catBudget)}
-              </span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.65)',
-                textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                {fmt.m(catForecast)}
-              </span>
-              <span style={{ fontSize: 12, fontWeight: 700,
-                color: catFav ? '#72D4A0' : '#E87878', textAlign: 'right',
-                fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                {catFav ? '\u2212' : '+'}{fmt.k(Math.abs(catVariance))}
-              </span>
-            </div>
-          ) : vendorData ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 104px 104px 104px',
-              padding: '10px 24px', borderTop: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.03)', position: 'sticky', bottom: 0 }}>
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)',
-                fontStyle: 'italic', fontFamily: "'Inter',sans-serif" }}>Vendor Total</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.65)',
-                textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                {fmt.m(vendorData.budget)}
-              </span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.65)',
-                textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                {fmt.m(vendorData.forecast)}
-              </span>
-              <span style={{ fontSize: 12, fontWeight: 700,
-                color: vendorData.variance < 0 ? '#72D4A0' : '#E87878', textAlign: 'right',
-                fontVariantNumeric: 'tabular-nums', fontFamily: "'Inter',sans-serif" }}>
-                {vendorData.variance < 0 ? '\u2212' : '+'}{fmt.k(Math.abs(vendorData.variance))}
-              </span>
-            </div>
-          ) : null}
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-window.CategoryWaterfallPanel = CategoryWaterfallPanel;
+  // Public API
+  window.parseTechFinancialsXlsx = async function (file) {
+    const buf = await file.arrayBuffer();
+    return parseExcelArrayBuffer(buf);
+  };
+  window.parseTechFinancialsXlsxFromArrayBuffer = parseExcelArrayBuffer;
+})();

@@ -1,298 +1,690 @@
-// tab-sunburst.jsx — Generic sunburst for Risk / Opp / Net KPI drilldowns
-// Accepts items prop: [{ cat, variance, vendors: [{ name, variance, contracts: [{ name, variance, notes }] }] }]
-// Positive variance = unfavorable (red). Negative = favorable (green).
-const { useState: useStateSB } = React;
+// tab-overview.jsx — Executive Overview · Fixed executive story
+// Row 1: 4 Primary KPIs · Row 2: 3 Risk/Opp/Net KPIs
+// Row 3: Executive Bridge · Row 4: Forecast Variance + Drill-Down
 
-const SB_SERIF = "'Source Serif 4', Georgia, serif";
-const SB_SANS  = "'Inter', Arial, sans-serif";
-const SB_NAVY  = '#333C66';
-const SB_RED   = '#B23A3A';
-const SB_GREEN = '#2F7A4D';
-
-// ── Category-based color system (matches drill-panels palette) ────────
-const SB_CAT_PALETTE = {
-  'Labor/ T&M':    '#6699FF',
-  'Software':      '#EDAC4B',
-  'MS':            '#B088D4',
-  'Infrastructure':'#5DB8A2',
-  'Hardware':      '#E08070',
-  'OOE':           '#C9B54A',
-  'Amortization':  '#80BCDC',
-  'FPC':           '#72C472',
+// ── Fixed executive story ─────────────────────────────────────────────────
+const EXEC_STORY = {
+  budget:    44790000,
+  forecast:  46170000,
+  actual:    19830000,
+  remaining: 26340000,
+  risk:      3510000,
+  opp:       2010000,
+  net:       1500000,
 };
-function _sbH2H(hex){let r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;if(mx===mn)return[0,0,l*100];const d=mx-mn,s=l>.5?d/(2-mx-mn):d/(mx+mn);let h;switch(mx){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}return[h/6*360,s*100,l*100];}
-function _sbH2hex(h,s,l){h/=360;s/=100;l/=100;if(s===0){const v=Math.round(l*255);return'#'+[v,v,v].map(x=>x.toString(16).padStart(2,'0')).join('');}const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q,hr=(t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};return'#'+[h+1/3,h,h-1/3].map(t=>Math.round(hr(t)*255).toString(16).padStart(2,'0')).join('');}
-// depth 0=category(full strength), 1=vendor(lighter), 2=contract(lightest); idx adds subtle per-item variation
-function catColorSB(cat, depth, idx) {
-  const base = SB_CAT_PALETTE[cat] || '#8899BB';
-  const [h,s,l] = _sbH2H(base);
-  return _sbH2hex(h, Math.max(18, s - 13*depth - 2.5*(idx||0)), Math.min(86, l + 15*depth + 3.5*(idx||0)));
+
+const EXEC_CATEGORIES = [
+  { cat: "Labor/ T&M", variance: 1761250, hasDrill: true },
+  { cat: "Software", variance: 772434, hasDrill: true },
+  { cat: "MS", variance: 203152, hasDrill: true },
+  { cat: "Infrastructure", variance: -14371, hasDrill: false },
+  { cat: "Hardware", variance: 59289, hasDrill: true },
+  { cat: "OOE", variance: 74411, hasDrill: true },
+  { cat: "FPC", variance: -1353167, hasDrill: true },
+];
+
+const EXEC_DRILL = {
+  "Labor/ T&M": [
+    { name: "Intelligent Business Platforms LLC", variance: 916752 },
+    { name: "Indus Valley Partners Corporation", variance: 807200 },
+    { name: "Andersen Tax Holdings", variance: 95033 },
+    { name: "Coforge DPA NA Inc.", variance: -52195 },
+    { name: "Cognizant Worldwide Limited", variance: -5540 },
+  ],
+  "Software": [
+    { name: "Finastra Technology, Inc", variance: 456079 },
+    { name: "MARKIT NORTH AMERICA, INC.", variance: 232488 },
+    { name: "Indus Valley Partners Corporation", variance: -215776 },
+    { name: "PactFi Inc.", variance: 132828 },
+    { name: "CME Group", variance: 92000 },
+    { name: "Allvue Systems, LLC", variance: 86226 },
+    { name: "Other", variance: -11411 },
+  ],
+  "MS": [
+    { name: "Coforge DPA NA Inc.", variance: 247000 },
+    { name: "Indus Valley Partners Corporation", variance: -21401 },
+    { name: "Virteva LLC", variance: -10000 },
+    { name: "Archetype Consulting, Inc.", variance: -7725 },
+    { name: "NewRocket, LLC", variance: -4330 },
+    { name: "Other", variance: -392 },
+  ],
+  "Infrastructure": [
+    { name: "CDW DIRECT LLC", variance: -11985 },
+    { name: "Cisco Systems, Inc.", variance: -1674 },
+    { name: "Other", variance: -712 },
+  ],
+  "Hardware": [
+    { name: "CDW DIRECT LLC", variance: 67802 },
+    { name: "SHI International Corp", variance: -8513 },
+  ],
+  "OOE": [
+    { name: "G Treasury SS, LLC", variance: 41250 },
+    { name: "Amortization/Multiple", variance: 19602 },
+    { name: "Norske Finansielle Referanser AS", variance: 15208 },
+    { name: "Bloomberg Finance L.P.", variance: -1821 },
+    { name: "Other", variance: 172 },
+  ],
+  "FPC": [
+    { name: "Indus Valley Partners Corporation", variance: -884000 },
+    { name: "MARKIT NORTH AMERICA, INC.", variance: -330000 },
+    { name: "Coforge DPA NA Inc.", variance: -139167 },
+  ],
+};
+
+// Percentage of total absolute variance per category
+const TOTAL_ABS_VAR = EXEC_CATEGORIES.reduce((s, d) => s + Math.abs(d.variance), 0);
+function catPct(v) {
+  if (Math.abs(v) < 25000) return null;
+  return Math.round(Math.abs(v) / TOTAL_ABS_VAR * 100);
 }
-// Diverging color for Net Position: negative=favorable(green), positive=unfavorable(red), t=magnitude
-// depth 0=category(full), 1=vendor/zoomed-vendor(lighter), 2=contract(lightest)
-function netDivColorSB(amount, scale, depth) {
-  const d = depth || 0;
-  const abs = Math.abs(amount);
-  const sc  = Math.max(scale, 1);
-  if (abs < sc * 0.03) return `hsl(0,0%,${50 + d*12}%)`; // < 3% of scale → neutral gray
-  const t   = Math.min(1, abs / sc);
-  const fav = amount < 0;
-  const hue = fav ? 138 : 4;
-  const sat = Math.max(18, (fav ? 42 + t*28 : 48 + t*26) - d*10);
-  const lit = Math.min(82, (fav ? 60 - t*24 : 64 - t*28) + d*13);
-  return `hsl(${hue},${sat}%,${lit}%)`;
-}
 
-function pt(cx, cy, r, a) {
-  return [cx + r * Math.cos(a - Math.PI / 2), cy + r * Math.sin(a - Math.PI / 2)];
-}
-function arc(cx, cy, r1, r2, a1, a2) {
-  if (Math.abs(a2 - a1) < 0.002) return '';
-  const lg = a2 - a1 > Math.PI ? 1 : 0;
-  const [x1,y1] = pt(cx, cy, r2, a1);
-  const [x2,y2] = pt(cx, cy, r2, a2);
-  const [x3,y3] = pt(cx, cy, r1, a2);
-  const [x4,y4] = pt(cx, cy, r1, a1);
-  return `M${x1.toFixed(2)},${y1.toFixed(2)} A${r2},${r2} 0 ${lg} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L${x3.toFixed(2)},${y3.toFixed(2)} A${r1},${r1} 0 ${lg} 0 ${x4.toFixed(2)},${y4.toFixed(2)}Z`;
-}
+// ─────────────────────────────────────────────────────────────────────────
+function OverviewTab({ data }) {
+  const { useState: useStateOV } = React;
+  const [selectedCat, setSelectedCat] = useStateOV(null);
+  const [openPanel,   setOpenPanel]   = useStateOV(null);
 
-// ── Tooltip ────────────────────────────────────────────────────────────
-function SBTooltip({ tip }) {
-  if (!tip) return null;
-  const fav = tip.variance < 0;
-  return (
-    <div style={{
-      position:'fixed', left:tip.px+14, top:tip.py-10,
-      background:SB_NAVY, color:'#fff', padding:'8px 13px',
-      fontSize:12, lineHeight:1.7, pointerEvents:'none', zIndex:300,
-      boxShadow:'0 4px 16px rgba(0,0,0,0.35)', maxWidth:240,
-      border:'1px solid rgba(255,255,255,0.12)',
-    }}>
-      <div style={{ fontWeight:600, fontSize:13, marginBottom:2 }}>{tip.label}</div>
-      <div style={{ color:fav?'#72D4A0':'#E87878', fontWeight:700, fontVariantNumeric:'tabular-nums', fontSize:14 }}>
-        {fav?'−':'+'}{fmt.m(Math.abs(tip.variance))}
-      </div>
-      <div style={{ color:'rgba(255,255,255,0.6)', fontSize:11, marginTop:1 }}>
-        {tip.pctParent}% of {tip.parentLabel} · {tip.pctTotal}% of total
-      </div>
-      {tip.hint && <div style={{ color:'rgba(255,255,255,0.4)', fontSize:11, fontStyle:'italic' }}>{tip.hint}</div>}
-    </div>
-  );
-}
+  const e        = EXEC_STORY;
+  const variance = e.forecast - e.budget;   // +1,380,000
+  const favorable = variance <= 0;
+  const varPct   = (Math.abs(variance) / e.budget * 100).toFixed(1);
 
-// ── Main component ─────────────────────────────────────────────────────
-// Props:
-//   items          – [{ cat, variance, vendors }]  — signed; positive=unfav, negative=fav
-//   totalAmount    – number to display in center (always positive)
-//   centerSign     – '+' | '−'
-//   centerColor    – css color for center value
-//   centerLabel    – small label above center value
-//   isDark         – bool, background is dark
-// Props:
-//   size      – SVG size in px (default 440; use 340 for compact left-column use)
-//   zoomed    – controlled zoom (cat name or null); if omitted, self-manages
-//   onZoom    – called when user clicks to zoom; required when zoomed is provided
-function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel, isDark,
-                        size, zoomed: zExt, onZoom, diverging, hideLegend }) {
-  const [zInt,    setZInt]    = useStateSB(null);
-  const [tooltip, setTooltip] = useStateSB(null);
-  const [hov,     setHov]     = useStateSB(null);
-  const controlled = onZoom !== undefined;
-  const zoomed    = controlled ? (zExt||null) : zInt;
-  const setZoomed = controlled ? onZoom : (c)=>{ setZInt(c); setTooltip(null); };
+  // ── Bridge chart math (≈35% shorter than original) ───────────────────
+  const CHART_H     = 130;
+  const LABEL_SPACE = 40;
+  const SVG_W       = 640;
+  const AXIS_Y      = LABEL_SPACE + CHART_H;
+  const SVG_H       = AXIS_Y + 44;
+  const BAR_W       = 110;
+  const M           = 52;
+  const barGap      = (SVG_W - 2 * M - 3 * BAR_W) / 2;
+  const colX        = [M, M + BAR_W + barGap, M + 2 * BAR_W + 2 * barGap];
 
-  const data = items || [];
-  if (!data.length) return null;
+  const NAVY  = '#333C66';
+  const CONN  = '#C7C5C1';
+  const GREEN = '#2F7A4D';
+  const RED   = '#B23A3A';
 
-  const totalAbs = data.reduce((s,c) => s + Math.abs(c.variance), 0);
-  const SZ = size || 440;
-  const SC = SZ / 440;
-  const CX=SZ/2, CY=SZ/2, R0=Math.round(55*SC), R1=Math.round(125*SC), R2=Math.round(188*SC), W=SZ, H=SZ;
+  const scaleMax   = Math.max(e.budget, e.forecast) * 1.14;
+  const toY        = v => AXIS_Y - (v / scaleMax) * CHART_H;
+  const budgetTopY = toY(e.budget);
+  const fcTopY     = toY(e.forecast);
+  const deltaTopY  = Math.min(budgetTopY, fcTopY);
+  const deltaBotY  = Math.max(budgetTopY, fcTopY);
+  const deltaH     = Math.max(deltaBotY - deltaTopY, 3);
+  const DELTA_C    = favorable ? GREEN : RED;
+  const FC_C       = favorable ? NAVY  : RED;
 
-  // Diverging scale for Net Position mode (computed at component scope for legend access)
-  const divCatScale = diverging ? Math.max(1, ...data.map(c => Math.abs(c.variance))) : 1;
+  const bridgeNote = `Forecast is ${fmt.m(Math.abs(variance))} ${favorable ? 'favorable to' : 'unfavorable to'} Budget  ·  ${varPct}% variance`;
 
-  // Build segments
-  const segs = [];
-  if (!zoomed) {
-    let angle = 0;
-    data.forEach((cat, ci) => {
-      const catSpan = totalAbs > 0 ? (Math.abs(cat.variance) / totalAbs) * 2 * Math.PI : 0;
-      const isUnfav = cat.variance > 0;
-      segs.push({
-        key:'c'+ci, type:'cat', label:cat.cat, variance:cat.variance,
-        parentLabel:'total', parentAbs:totalAbs,
-        d:arc(CX,CY,R0,R1,angle,angle+catSpan),
-        fill:diverging ? netDivColorSB(cat.variance, divCatScale, 0) : catColorSB(cat.cat,0,ci),
-        onClick:()=>setZoomed(cat.cat),
-        hint:'Click to drill into vendors',
-      });
-      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
-      let va = angle;
-      cat.vendors.forEach((vnd,vi) => {
-        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*catSpan : 0;
-        segs.push({
-          key:'v'+ci+'_'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
-          labelFull:vnd.name, variance:vnd.variance,
-          parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
-          d:arc(CX,CY,R1,R2,va,va+vSpan),
-          fill:diverging ? netDivColorSB(vnd.variance, divCatScale, 1) : catColorSB(cat.cat,1,vi),
-          onClick:()=>setZoomed(cat.cat),
-          hint:'Click to drill in',
-        });
-        va += vSpan;
-      });
-      angle += catSpan;
-    });
-  } else {
-    const cat = data.find(c=>c.cat===zoomed);
-    if (cat) {
-      const isUnfav = cat.variance > 0;
-      const divVndScale = diverging ? Math.max(1, ...cat.vendors.map(v => Math.abs(v.variance))) : 1;
-      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
-      let va = 0;
-      cat.vendors.forEach((vnd,vi) => {
-        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*2*Math.PI : 0;
-        segs.push({
-          key:'zv'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
-          labelFull:vnd.name, variance:vnd.variance,
-          parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
-          d:arc(CX,CY,R0,R1,va,va+vSpan),
-          fill:diverging ? netDivColorSB(vnd.variance, divVndScale, 0) : catColorSB(zoomed,1,vi), onClick:null,
-        });
-        const divCtScale = diverging ? Math.max(1, ...vnd.contracts.map(c => Math.abs(c.variance))) : 1;
-        const vndAbsCt = vnd.contracts.reduce((s,c)=>s+Math.abs(c.variance),0);
-        let ca = va;
-        vnd.contracts.forEach((ct,ci) => {
-          const cSpan = vndAbsCt > 0 ? (Math.abs(ct.variance)/vndAbsCt)*vSpan : 0;
-          segs.push({
-            key:'zc'+vi+'_'+ci, type:'contract',
-            label:ct.name.length>34?ct.name.slice(0,33)+'…':ct.name,
-            labelFull:ct.name, variance:ct.variance,
-            parentLabel:vnd.name.length>18?vnd.name.slice(0,17)+'…':vnd.name,
-            parentAbs:Math.abs(vnd.variance),
-            d:arc(CX,CY,R1,R2,ca,ca+cSpan),
-            fill:diverging ? netDivColorSB(ct.variance, divCtScale, 1) : catColorSB(zoomed,2,ci), onClick:null,
-          });
-          ca += cSpan;
-        });
-        va += vSpan;
-      });
-    }
-  }
+  // ── Category chart scales ─────────────────────────────────────────────
+  const maxAbs = Math.max(...EXEC_CATEGORIES.map(d => Math.abs(d.variance)), 1);
 
-  function onMove(e, seg) {
-    const pP = seg.parentAbs>0?(Math.abs(seg.variance)/seg.parentAbs*100).toFixed(1):'0.0';
-    const pT = totalAbs>0?(Math.abs(seg.variance)/totalAbs*100).toFixed(1):'0.0';
-    setHov(seg.key);
-    setTooltip({ px:e.clientX, py:e.clientY, label:seg.labelFull||seg.label,
-      variance:seg.variance, pctParent:pP, pctTotal:pT, parentLabel:seg.parentLabel, hint:seg.hint||null });
-  }
-  function onLeave() { setHov(null); setTooltip(null); }
+  // ── Drill data ────────────────────────────────────────────────────────
+  const drillItems  = selectedCat ? (EXEC_DRILL[selectedCat] || []) : [];
+  const drillCat    = EXEC_CATEGORIES.find(d => d.cat === selectedCat);
+  const drillTotal  = drillCat ? drillCat.variance : 0;
+  const drillMaxAbs = Math.max(...drillItems.map(d => Math.abs(d.variance)), 1);
 
-  const zCatLgd = zoomed ? data.find(c=>c.cat===zoomed) : null;
-  const divLgdVScale = (diverging && zCatLgd) ? Math.max(1, ...zCatLgd.vendors.map(v => Math.abs(v.variance))) : 1;
-  const legendItems = zoomed
-    ? (data.find(c=>c.cat===zoomed)?.vendors||[]).map((v,i)=>({ label:v.name, variance:v.variance,
-        color: diverging ? netDivColorSB(v.variance, divLgdVScale, 0) : catColorSB(zoomed,1,i) }))
-    : data.map((c,i)=>({ label:c.cat, variance:c.variance,
-        color: diverging ? netDivColorSB(c.variance, divCatScale, 0) : catColorSB(c.cat,0,i),
-        onClick:()=>setZoomed(c.cat) }));
+  // ── Shared tokens ─────────────────────────────────────────────────────
+  const EYEBROW = {
+    fontFamily: "'Source Serif 4', Georgia, serif",
+    fontWeight: 800, fontSize: 10,
+    letterSpacing: '0.22em', textTransform: 'lowercase',
+    color: 'var(--antares-stone-gray)',
+  };
+  const CARD  = { background: '#fff', border: '1px solid var(--color-border)' };
+  const MB    = { marginBottom: 20 };
+  const SERIF = "'Source Serif 4', Georgia, serif";
+  const SANS  = "'Inter', Arial, sans-serif";
 
-  const bg  = isDark ? 'transparent' : '#F9F8F5';
-  const lgC = isDark ? 'rgba(255,255,255,0.82)' : 'var(--antares-soft-black)';
-  const sgC = isDark ? 'var(--antares-stone-gray)' : 'var(--antares-stone-gray)';
-
-  const compact = SZ < 400;
-
-  return (
-    <div style={{ position:'relative' }} onMouseLeave={onLeave}>
-      <SBTooltip tip={tooltip} />
-      <div style={{ display:'flex', gap:compact?12:24, alignItems:'flex-start', flexWrap:'wrap' }}>
-        <div style={{ flexShrink:0, position:'relative' }}>
-          {zoomed && (
-            <button onClick={()=>{setZoomed(null);setTooltip(null);}} style={{
-              position:'absolute', top:6, right:6, zIndex:2, background:'none',
-              border:'1px solid rgba(255,255,255,0.22)', borderRadius:2,
-              padding:'3px 10px', fontSize:11, cursor:'pointer',
-              color:'rgba(255,255,255,0.7)', fontFamily:SB_SANS,
-            }}>← back</button>
-          )}
-          <svg width={W} height={H} style={{ display:'block' }}>
-            <circle cx={CX} cy={CY} r={R2+4} fill={bg} />
-            {segs.map(s=>(
-              <path key={s.key} d={s.d} fill={s.fill}
-                fillOpacity={hov===s.key?1:0.82} stroke={isDark?'rgba(0,0,0,0.35)':'#fff'} strokeWidth="1.5"
-                style={{ cursor:s.onClick?'pointer':'default', transition:'fill-opacity 0.1s' }}
-                onMouseMove={e=>onMove(e,s)} onMouseEnter={e=>onMove(e,s)} onClick={s.onClick}
-              />
-            ))}
-            <circle cx={CX} cy={CY} r={R0-3} fill={isDark?'rgba(0,0,0,0.4)':'#fff'}
-              stroke={isDark?'rgba(255,255,255,0.12)':'var(--color-border)'} strokeWidth="1" />
-            {(()=>{
-              const rawLbl = zoomed ? (data.find(c=>c.cat===zoomed)?.cat||'') : (centerLabel||'');
-              const words = rawLbl.trim().split(/\s+/).filter(Boolean);
-              const lines = words.length > 1
-                ? [words.slice(0,Math.ceil(words.length/2)).join(' '), words.slice(Math.ceil(words.length/2)).join(' ')]
-                : [rawLbl];
-              const topY = lines.length > 1 ? CY-22 : CY-14;
-              return (
-                <text textAnchor="middle" fontFamily={SB_SERIF} fontWeight="800"
-                  fontSize="8" fill={isDark?'rgba(255,255,255,0.48)':'var(--antares-stone-gray)'}
-                  letterSpacing="0.1em">
-                  {lines.map((ln,i)=>(
-                    <tspan key={i} x={CX} y={topY+i*11} style={{ textTransform:'uppercase' }}>{ln}</tspan>
-                  ))}
-                </text>
-              );
-            })()}
-            <text x={CX} y={CY+7} textAnchor="middle" fontFamily={SB_SERIF} fontWeight="600"
-              fontSize="15" fill={zoomed?(data.find(c=>c.cat===zoomed)?.variance>0?SB_RED:SB_GREEN):centerColor}>
-              {zoomed
-                ? ((data.find(c=>c.cat===zoomed)?.variance||0)<0?'−':'+') + fmt.m(Math.abs(data.find(c=>c.cat===zoomed)?.variance||0))
-                : centerSign + fmt.m(totalAmount)}
-            </text>
-            {!hideLegend && <text x={CX} y={CY+21} textAnchor="middle" fontFamily={SB_SANS} fontSize="9"
-              fill={isDark?'rgba(255,255,255,0.38)':'var(--antares-stone-gray)'}>
-              {zoomed ? 'click ← to reset' : 'click segment to drill'}
-            </text>}
-          </svg>
+  function SectionHead({ eyebrow, title, style }) {
+    return (
+      <div style={style}>
+        <div style={{ ...EYEBROW, marginBottom: 6 }}>{eyebrow}</div>
+        <div style={{
+          fontFamily: SERIF, fontWeight: 600, fontSize: 18,
+          color: 'var(--antares-signature-navy)', letterSpacing: '-0.005em',
+        }}>
+          {title}
         </div>
-        {!hideLegend && (
-        <div style={{ paddingTop:14, minWidth:190, maxWidth:240 }}>
-          <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
-            color:isDark?'rgba(255,255,255,0.4)':SB_NAVY, fontFamily:SB_SERIF, marginBottom:12 }}>
-            {zoomed ? zoomed + ' — Vendors' : 'Categories'}
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  return (
+    <div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 1 · 4 PRIMARY KPIs
+      ══════════════════════════════════════════════════════════════════ */}
+      <div style={{ ...CARD, ...MB, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        {[
+          { label: 'annual budget',      value: fmt.m(e.budget),    sub: '2026 approved' },
+          { label: 'year-end forecast',  value: fmt.m(e.forecast),  sub: 'actuals + remaining' },
+          { label: 'ytd actual spend',   value: fmt.m(e.actual),    sub: `${(e.actual / e.budget * 100).toFixed(1)}% of budget consumed` },
+          { label: 'remaining forecast', value: fmt.m(e.remaining), sub: 'balance to year-end' },
+        ].map((kpi, i) => (
+          <div key={i} style={{
+            padding: '32px 28px 28px',
+            borderLeft: i > 0 ? '1px solid var(--color-border)' : 'none',
+          }}>
+            <div style={{ ...EYEBROW, marginBottom: 12 }}>{kpi.label}</div>
+            <div style={{
+              fontFamily: SERIF, fontWeight: 600, fontSize: 40, lineHeight: 1,
+              letterSpacing: '-0.01em', color: 'var(--antares-signature-navy)',
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+              {kpi.value}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--antares-stone-gray)', marginTop: 9 }}>
+              {kpi.sub}
+            </div>
           </div>
-          {legendItems.map((item,i)=>(
-            <div key={i} onClick={item.onClick}
-              style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6,
-                cursor:item.onClick?'pointer':'default', opacity:1, transition:'opacity 0.1s' }}
-              onMouseEnter={e=>{if(item.onClick)e.currentTarget.style.opacity='0.7';}}
-              onMouseLeave={e=>{e.currentTarget.style.opacity='1';}}>
-              <div style={{ width:11, height:11, background:item.color, flexShrink:0, borderRadius:2 }} />
-              <div style={{ fontSize:12, color:lgC, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {item.label}
+        ))}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 2 · 3 RISK / OPP / NET KPIs
+      ══════════════════════════════════════════════════════════════════ */}
+      <div style={{ ...CARD, ...MB, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
+
+        <button
+          onClick={() => setOpenPanel({ type: 'risk' })}
+          style={{
+            padding: '28px 28px 24px',
+            borderTop: '3px solid #B23A3A', borderRight: 'none', borderBottom: 'none', borderLeft: 'none',
+            background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', width: '100%',
+            transition: 'background 0.12s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#FBEDED'}
+          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        >
+          <div style={{ ...EYEBROW, marginBottom: 12 }}>risk</div>
+          <div style={{
+            fontFamily: SERIF, fontWeight: 600, fontSize: 36, lineHeight: 1,
+            letterSpacing: '-0.01em', color: '#B23A3A', fontVariantNumeric: 'tabular-nums',
+          }}>
+            {fmt.m(e.risk)}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--antares-stone-gray)', marginTop: 9 }}>downside exposure</div>
+          <div style={{ marginTop: 10, fontSize: 11, color: '#B23A3A', opacity: 0.65,
+            display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            investigate
+          </div>
+        </button>
+
+        <button
+          onClick={() => setOpenPanel({ type: 'opp' })}
+          style={{
+            padding: '28px 28px 24px',
+            borderTop: '3px solid #2F7A4D', borderRight: 'none', borderBottom: 'none',
+            borderLeft: '1px solid var(--color-border)',
+            background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', width: '100%',
+            transition: 'background 0.12s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#EAF4EE'}
+          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        >
+          <div style={{ ...EYEBROW, marginBottom: 12 }}>opportunities</div>
+          <div style={{
+            fontFamily: SERIF, fontWeight: 600, fontSize: 36, lineHeight: 1,
+            letterSpacing: '-0.01em', color: '#2F7A4D', fontVariantNumeric: 'tabular-nums',
+          }}>
+            {fmt.m(e.opp)}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--antares-stone-gray)', marginTop: 9 }}>favorable upside</div>
+          <div style={{ marginTop: 10, fontSize: 11, color: '#2F7A4D', opacity: 0.65,
+            display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            investigate
+          </div>
+        </button>
+
+        <button
+          onClick={() => setOpenPanel({ type: 'variance' })}
+          style={{
+            padding: '28px 28px 24px',
+            borderTop: 'none', borderRight: 'none', borderBottom: 'none',
+            borderLeft: '1px solid rgba(255,255,255,0.1)',
+            background: 'var(--antares-signature-navy)',
+            cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', width: '100%',
+            transition: 'filter 0.12s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.15)'}
+          onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+          onClick={() => setOpenPanel({ type: 'net' })}
+        >
+          <div style={{ ...EYEBROW, color: 'rgba(255,255,255,0.52)', marginBottom: 12 }}>net opp/risk position</div>
+          <div style={{
+            fontFamily: SERIF, fontWeight: 600, fontSize: 36, lineHeight: 1,
+            letterSpacing: '-0.01em', color: '#fff', fontVariantNumeric: 'tabular-nums',
+          }}>
+            {fmt.m(e.net)}
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 500, marginTop: 9, color: '#72D4A0' }}>▲  net favorable</div>
+          <div style={{ marginTop: 10, fontSize: 11, color: 'rgba(255,255,255,0.5)',
+            display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            explore variance
+          </div>
+        </button>
+
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 3 · EXECUTIVE BRIDGE
+      ══════════════════════════════════════════════════════════════════ */}
+      <div style={{ ...CARD, ...MB, padding: '28px 44px 20px' }}>
+
+        <SectionHead
+          eyebrow="budget to forecast"
+          title="Executive Bridge"
+          style={{ marginBottom: 20 }}
+        />
+
+        <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{ display: 'block', overflow: 'visible' }}>
+          {/* Axis */}
+          <line x1={M - 8} y1={AXIS_Y} x2={SVG_W - M + 8} y2={AXIS_Y} stroke={CONN} strokeWidth="1" />
+          {/* Connectors */}
+          <line x1={colX[0] + BAR_W} y1={budgetTopY} x2={colX[1]}        y2={budgetTopY} stroke={CONN} strokeWidth="1" />
+          <line x1={colX[1] + BAR_W} y1={fcTopY}     x2={colX[2]}        y2={fcTopY}     stroke={CONN} strokeWidth="1" />
+
+          {/* Budget bar */}
+          <rect x={colX[0]} y={budgetTopY} width={BAR_W} height={AXIS_Y - budgetTopY} fill={NAVY} />
+          <text x={colX[0] + BAR_W / 2} y={budgetTopY - 8}
+            textAnchor="middle" fill={NAVY}
+            fontFamily={SERIF} fontWeight="600" fontSize="13"
+            style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {fmt.m(e.budget)}
+          </text>
+
+          {/* Movement bar */}
+          <rect x={colX[1]} y={deltaTopY} width={BAR_W} height={deltaH} fill={DELTA_C} />
+          <text x={colX[1] + BAR_W / 2} y={deltaTopY - 22}
+            textAnchor="middle" fill={DELTA_C}
+            fontFamily={SANS} fontWeight="700" fontSize="8" letterSpacing="0.09">
+            {favorable ? 'FAVORABLE' : 'UNFAVORABLE'}
+          </text>
+          <text x={colX[1] + BAR_W / 2} y={deltaTopY - 9}
+            textAnchor="middle" fill={DELTA_C}
+            fontFamily={SERIF} fontWeight="600" fontSize="13"
+            style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {favorable ? '−' : '+'}{fmt.m(Math.abs(variance))}
+          </text>
+
+          {/* Forecast bar */}
+          <rect x={colX[2]} y={fcTopY} width={BAR_W} height={AXIS_Y - fcTopY} fill={FC_C} />
+          <text x={colX[2] + BAR_W / 2} y={fcTopY - 8}
+            textAnchor="middle" fill={FC_C}
+            fontFamily={SERIF} fontWeight="600" fontSize="13"
+            style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {fmt.m(e.forecast)}
+          </text>
+
+          {/* X-axis labels */}
+          <text x={colX[0] + BAR_W / 2} y={AXIS_Y + 17} textAnchor="middle" fill={NAVY}    fontFamily={SANS} fontWeight="600" fontSize="11">Budget</text>
+          <text x={colX[1] + BAR_W / 2} y={AXIS_Y + 17} textAnchor="middle" fill="#807E7A" fontFamily={SANS} fontWeight="400" fontSize="11">Movement</text>
+          <text x={colX[2] + BAR_W / 2} y={AXIS_Y + 17} textAnchor="middle" fill={FC_C}    fontFamily={SANS} fontWeight="600" fontSize="11">Forecast</text>
+
+          {/* Summary note */}
+          <text x={SVG_W / 2} y={AXIS_Y + 37} textAnchor="middle" fill="#A09E9A" fontFamily={SANS} fontSize="10">
+            {bridgeNote}
+          </text>
+        </svg>
+
+      </div>
+
+      {/* ── Filter trigger ────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button
+          onClick={() => setOpenPanel({ type: 'filter' })}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 14px',
+            background: '#fff', border: '1px solid var(--color-border)',
+            cursor: 'pointer', fontFamily: SANS, fontSize: 12, fontWeight: 500,
+            color: 'var(--antares-stone-gray)', transition: 'color 0.12s, border-color 0.12s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--antares-signature-navy)'; e.currentTarget.style.borderColor = 'var(--antares-signature-navy)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--antares-stone-gray)'; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+          Filters
+        </button>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          ROW 4 · DRIVERS OF FORECAST VARIANCE + DRILL-DOWN
+      ══════════════════════════════════════════════════════════════════ */}
+      <div style={{ ...CARD, overflow: 'hidden' }}>
+
+        {/* ── Chart panel ────────────────────────────────────────────── */}
+        <div style={{ padding: '36px 44px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
+            <SectionHead
+              eyebrow="forecast variance · key drivers"
+              title="Drivers of Forecast Variance"
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--antares-stone-gray)', textAlign: 'right', lineHeight: 1.6 }}>
+                Unfavorable → over budget<br />← Favorable = under budget
               </div>
-              <div style={{ fontSize:12, fontWeight:600, fontVariantNumeric:'tabular-nums', fontFamily:SB_SANS,
-                flexShrink:0, color:item.variance>0?SB_RED:SB_GREEN }}>
-                {item.variance>0?'+':'−'}{fmt.k(Math.abs(item.variance))}
-              </div>
+              <button
+                onClick={() => setOpenPanel({ type: 'variance' })}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                  background: 'var(--antares-signature-navy)', border: 'none',
+                  color: '#fff', cursor: 'pointer', fontFamily: SANS,
+                  fontSize: 11, fontWeight: 600, letterSpacing: '0.02em',
+                }}>
+                Explore variance
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
             </div>
-          ))}
-          {!zoomed && (
-            <div style={{ marginTop:12, paddingTop:8, borderTop:`1px solid ${isDark?'rgba(255,255,255,0.1)':'var(--color-border)'}`,
-              fontSize:11, color:sgC, lineHeight:1.6 }}>
-              Inner: categories<br/>
-              Outer: vendors<br/>
-              Click to drill in
+                    <div style={{ fontSize: 11, color: 'var(--antares-stone-gray)', textAlign: 'right', lineHeight: 1.6 }}>
+                  Unfavorable → over budget<br />← Favorable = under budget
+                </div>
+                <button
+                  onClick={() => setOpenPanel({ type: 'variance' })}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
+                    background: 'var(--antares-signature-navy)', border: 'none',
+                    color: '#fff', cursor: 'pointer', fontFamily: SANS, fontSize: 11, fontWeight: 600 }}>
+                  Explore variance
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+              </>)}
+            </div>
+          </div>
+
+          {/* Column headers */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, paddingLeft: 160 }}>
+            <div style={{
+              flex: 1, textAlign: 'right', paddingRight: 10,
+              fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase',
+              color: GREEN, fontFamily: SANS, fontWeight: 600,
+            }}>
+              ← favorable
+            </div>
+            <div style={{ width: 2, flexShrink: 0 }} />
+            <div style={{
+              flex: 1, paddingLeft: 10,
+              fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase',
+              color: RED, fontFamily: SANS, fontWeight: 600,
+            }}>
+              unfavorable →
+            </div>
+          </div>
+
+          <div style={{ height: 1, background: '#ECEAE7', marginLeft: 160, marginBottom: 2 }} />
+
+          {/* Category rows */}
+          {EXEC_CATEGORIES.map(({ cat, variance: catVar, hasDrill }) => {
+            const isSelected = selectedCat === cat;
+            const isFav      = catVar < 0;
+            const isNeutral  = Math.abs(catVar) < 25000;
+            const barPct     = isNeutral ? 0 : (Math.abs(catVar) / maxAbs) * 84;
+            const color      = isNeutral ? '#C7C5C1' : isFav ? GREEN : RED;
+            const labelStr   = fmt.k(Math.abs(catVar));
+            const pct        = catPct(catVar);
+
+            return (
+              <div
+                key={cat}
+                onClick={() => hasDrill ? setSelectedCat(isSelected ? null : cat) : null}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  height: 50,
+                  borderBottom: '1px solid #F0EEEB',
+                  cursor: hasDrill ? 'pointer' : 'default',
+                  background: isSelected ? '#F5F4F1' : 'transparent',
+                  transition: 'background 0.12s',
+                  marginLeft: -44,
+                  marginRight: -44,
+                  paddingLeft: 44,
+                  paddingRight: 44,
+                }}
+              >
+                {/* Label */}
+                <div style={{
+                  width: 160, flexShrink: 0,
+                  fontSize: 14, fontWeight: isSelected ? 600 : 400,
+                  color: isSelected ? NAVY : 'var(--antares-soft-black)',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}>
+                  {cat}
+                  {hasDrill && !isSelected && (
+                    <span style={{ fontSize: 9, color: 'var(--antares-stone-gray)', opacity: 0.55 }}>›</span>
+                  )}
+                  {isSelected && (
+                    <span style={{ fontSize: 9, color: NAVY, opacity: 0.5 }}>▾</span>
+                  )}
+                </div>
+
+                {/* Left area — favorable */}
+                <div style={{
+                  flex: 1, display: 'flex', justifyContent: 'flex-end',
+                  alignItems: 'center', gap: 6, paddingRight: 3,
+                }}>
+                  {isFav && !isNeutral && (
+                    <>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: 12, color, fontVariantNumeric: 'tabular-nums', fontFamily: SANS }}>
+                          −{labelStr}
+                        </span>
+                        {pct !== null && (
+                          <span style={{ fontSize: 10, color: 'var(--antares-stone-gray)', marginLeft: 5 }}>
+                            ({pct}%)
+                          </span>
+                        )}
+                      </div>
+                      <div style={{
+                        height: 22, width: `${barPct}%`,
+                        background: color, borderRadius: '3px 0 0 3px',
+                        transition: 'width 0.3s ease',
+                      }} />
+                    </>
+                  )}
+                </div>
+
+                {/* Center axis */}
+                <div style={{ width: 2, height: 36, background: '#D4D2CE', flexShrink: 0 }} />
+
+                {/* Right area — unfavorable */}
+                <div style={{
+                  flex: 1, display: 'flex', justifyContent: 'flex-start',
+                  alignItems: 'center', gap: 6, paddingLeft: 3,
+                }}>
+                  {!isFav && !isNeutral && (
+                    <>
+                      <div style={{
+                        height: 22, width: `${barPct}%`,
+                        background: color, borderRadius: '0 3px 3px 0',
+                        transition: 'width 0.3s ease',
+                      }} />
+                      <div>
+                        <span style={{ fontSize: 12, color, fontVariantNumeric: 'tabular-nums', fontFamily: SANS }}>
+                          +{labelStr}
+                        </span>
+                        {pct !== null && (
+                          <span style={{ fontSize: 10, color: 'var(--antares-stone-gray)', marginLeft: 5 }}>
+                            ({pct}%)
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
+                  {isNeutral && (
+                    <span style={{ fontSize: 12, color: '#C8C6C2', paddingLeft: 4 }}>—</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          </>)}
+
+        </div>
+
+          {viewMode === 'sunburst' && (
+            <div style={{ paddingBottom:36 }}><SunburstView /></div>
+          )}
+
+        {/* ── Drill-down panel — always present */}
+        <div style={{
+          borderTop: '1px solid var(--color-border)',
+          background: '#FAFAF8',
+          minHeight: 80,
+        }}>
+           {/* Default / empty state */}
+          {!selectedCat && (
+            <div style={{
+              padding: '28px 44px',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: '50%',
+                background: '#ECEAE7',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--antares-soft-black)', marginBottom: 2 }}>
+                  Category Breakdown
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--antares-stone-gray)' }}>
+                  Select Labor / T&amp;M, Software, or FPC above to view contributing vendors, contracts, and projects.
+                </div>
+              </div>
             </div>
           )}
+           {/* Populated state */}
+          {selectedCat && (
+            <div style={{ padding: '28px 44px 32px' }}>
+               {/* Drill-down header — improved */}
+              <div style={{
+                display: 'flex', alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                marginBottom: 20,
+              }}>
+                <div>
+                  <div style={{ ...EYEBROW, marginBottom: 8 }}>
+                    {selectedCat === 'FPC' ? 'fixed price contracts' : 'vendor detail'}
+                  </div>
+                  {/* Primary: Category Drivers */}
+                  <div style={{
+                    fontFamily: SERIF, fontWeight: 600, fontSize: 20,
+                    color: 'var(--antares-signature-navy)', marginBottom: 4,
+                  }}>
+                    {selectedCat} Drivers
+                  </div>
+                  {/* Secondary: variance amount */}
+                  <div style={{
+                    fontSize: 14, fontWeight: 600,
+                    color: drillTotal < 0 ? GREEN : RED,
+                    fontVariantNumeric: 'tabular-nums', fontFamily: SANS,
+                  }}>
+                    {drillTotal < 0 ? '−' : '+'}{fmt.m(Math.abs(drillTotal))} Net {drillTotal < 0 ? 'Favorable' : 'Unfavorable'}
+                  </div>
+                </div>
+                 <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                  {drillItems.length > 0 && (
+                    <button
+                      onClick={() => setOpenPanel({ type: 'variance', initialCat: selectedCat })}
+                      style={{
+                        background: 'var(--antares-signature-navy)', border: '1px solid var(--antares-signature-navy)',
+                        borderRadius: 4, padding: '5px 12px',
+                        fontSize: 12, color: '#fff',
+                        cursor: 'pointer', fontFamily: SANS, fontWeight: 600,
+                        display: 'flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      Full analysis
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSelectedCat(null)}
+                    style={{
+                      background: 'none', border: '1px solid var(--color-border)',
+                      borderRadius: 4, padding: '5px 12px',
+                      fontSize: 12, color: 'var(--antares-stone-gray)',
+                      cursor: 'pointer', fontFamily: SANS,
+                    }}
+                  >
+                    ✕ close
+                  </button>
+                </div>
+              </div>
+               {/* Contributor rows */}
+              {drillItems.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {drillItems.map((item, i) => {
+                    const itemFav   = item.variance < 0;
+                    const itemColor = itemFav ? GREEN : RED;
+                    const itemPct   = (Math.abs(item.variance) / drillMaxAbs) * 72;
+                     return (
+                      <div key={i} style={{
+                        display: 'grid',
+                        gridTemplateColumns: '220px 1fr auto',
+                        alignItems: 'center',
+                        gap: 16,
+                        padding: '10px 0',
+                        borderBottom: i < drillItems.length - 1 ? '1px solid #EBEBEB' : 'none',
+                      }}>
+                        <div style={{
+                          fontSize: 13, color: 'var(--antares-soft-black)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {item.name}
+                        </div>
+                         <div style={{ height: 8, background: '#ECEAE7', borderRadius: 2 }}>
+                          <div style={{
+                            height: '100%', width: `${itemPct}%`,
+                            background: itemColor, borderRadius: 2,
+                            opacity: 0.8,
+                            transition: 'width 0.35s ease',
+                          }} />
+                        </div>
+                         <div style={{
+                          fontSize: 13, fontWeight: 600,
+                          color: itemColor, fontVariantNumeric: 'tabular-nums',
+                          fontFamily: SANS, whiteSpace: 'nowrap', textAlign: 'right',
+                          minWidth: 72,
+                        }}>
+                          {itemFav ? '−' : '+'}{fmt.k(Math.abs(item.variance))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: 'var(--antares-stone-gray)', fontStyle: 'italic' }}>
+                  No breakdown available for {selectedCat}.
+                </div>
+              )}
+             </div>
+          )}
         </div>
-        )}
+
+
       </div>
+
+      {/* ── Drill panels ──────────────────────────────────────────── */}
+      {openPanel?.type === 'risk'     && <KPIDrillPanel mode="risk" onClose={() => setOpenPanel(null)} />}
+      {openPanel?.type === 'opp'      && <KPIDrillPanel mode="opp"  onClose={() => setOpenPanel(null)} />}
+      {openPanel?.type === 'net'      && <NetDrillPanel onClose={() => setOpenPanel(null)} />}
+      {openPanel?.type === 'variance' && <VarianceExplorerPanel initialCat={openPanel.initialCat || null} onClose={() => setOpenPanel(null)} />}
+      {openPanel?.type === 'filter'   && <FilterPanel onClose={() => setOpenPanel(null)} />}
+
     </div>
   );
 }
 
-window.SunburstView = SunburstView;
+window.OverviewTab = OverviewTab;

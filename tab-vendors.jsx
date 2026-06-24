@@ -1,387 +1,278 @@
-// Vendors tab — ranking + drill-in
-const { useState: useStateV, useMemo } = React;
+// tab-sunburst.jsx — Generic sunburst for Risk / Opp / Net KPI drilldowns
+// Accepts items prop: [{ cat, variance, vendors: [{ name, variance, contracts: [{ name, variance, notes }] }] }]
+// Positive variance = unfavorable (red). Negative = favorable (green).
+const { useState: useStateSB } = React;
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const SB_SERIF = "'Source Serif 4', Georgia, serif";
+const SB_SANS  = "'Inter', Arial, sans-serif";
+const SB_NAVY  = '#333C66';
+const SB_RED   = '#B23A3A';
+const SB_GREEN = '#2F7A4D';
 
-function VendorsTab({ data, view }) {
-  const [sortBy, setSortBy] = useStateV('actual');
-  const [sortDir, setSortDir] = useStateV('desc');
-  const [search, setSearch] = useStateV('');
-  const [filter, setFilter] = useStateV('all'); // all / risk / opp / over
-  const [selected, setSelected] = useStateV(null);
+// ── Category-based color system (matches drill-panels palette) ────────
+const SB_CAT_PALETTE = {
+  'Labor/ T&M':    '#6699FF',
+  'Software':      '#EDAC4B',
+  'MS':            '#B088D4',
+  'Infrastructure':'#5DB8A2',
+  'Hardware':      '#E08070',
+  'OOE':           '#C9B54A',
+  'Amortization':  '#80BCDC',
+  'FPC':           '#72C472',
+};
+function _sbH2H(hex){let r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;if(mx===mn)return[0,0,l*100];const d=mx-mn,s=l>.5?d/(2-mx-mn):d/(mx+mn);let h;switch(mx){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}return[h/6*360,s*100,l*100];}
+function _sbH2hex(h,s,l){h/=360;s/=100;l/=100;if(s===0){const v=Math.round(l*255);return'#'+[v,v,v].map(x=>x.toString(16).padStart(2,'0')).join('');}const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q,hr=(t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};return'#'+[h+1/3,h,h-1/3].map(t=>Math.round(hr(t)*255).toString(16).padStart(2,'0')).join('');}
+// depth 0=category(full strength), 1=vendor(lighter), 2=contract(lightest); idx adds subtle per-item variation
+function catColorSB(cat, depth, idx) {
+  const base = SB_CAT_PALETTE[cat] || '#8899BB';
+  const [h,s,l] = _sbH2H(base);
+  return _sbH2hex(h, Math.max(18, s - 13*depth - 2.5*(idx||0)), Math.min(86, l + 15*depth + 3.5*(idx||0)));
+}
+// Diverging color for Net Position: negative=favorable(green), positive=unfavorable(red), t=magnitude
+// depth 0=category(full), 1=vendor/zoomed-vendor(lighter), 2=contract(lightest)
+function netDivColorSB(amount, scale, depth) {
+  const d = depth || 0;
+  const abs = Math.abs(amount);
+  const sc  = Math.max(scale, 1);
+  if (abs < sc * 0.03) return `hsl(0,0%,${50 + d*12}%)`; // < 3% of scale → neutral gray
+  const t   = Math.min(1, abs / sc);
+  const fav = amount < 0;
+  const hue = fav ? 138 : 4;
+  const sat = Math.max(18, (fav ? 42 + t*28 : 48 + t*26) - d*10);
+  const lit = Math.min(82, (fav ? 60 - t*24 : 64 - t*28) + d*13);
+  return `hsl(${hue},${sat}%,${lit}%)`;
+}
 
-  const sorted = useMemo(() => {
-    let v = data.vendors.slice();
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      v = v.filter(x => x.vendor.toLowerCase().includes(q));
-    }
-    if (filter === 'risk') v = v.filter(x => x.net > 0);
-    if (filter === 'opp') v = v.filter(x => x.net < 0);
-    if (filter === 'over') v = v.filter(x => x.actual > x.budget);
-    v.sort((a, b) => {
-      let av = a[sortBy], bv = b[sortBy];
-      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      return sortDir === 'asc' ? av - bv : bv - av;
+function pt(cx, cy, r, a) {
+  return [cx + r * Math.cos(a - Math.PI / 2), cy + r * Math.sin(a - Math.PI / 2)];
+}
+function arc(cx, cy, r1, r2, a1, a2) {
+  if (Math.abs(a2 - a1) < 0.002) return '';
+  const lg = a2 - a1 > Math.PI ? 1 : 0;
+  const [x1,y1] = pt(cx, cy, r2, a1);
+  const [x2,y2] = pt(cx, cy, r2, a2);
+  const [x3,y3] = pt(cx, cy, r1, a2);
+  const [x4,y4] = pt(cx, cy, r1, a1);
+  return `M${x1.toFixed(2)},${y1.toFixed(2)} A${r2},${r2} 0 ${lg} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L${x3.toFixed(2)},${y3.toFixed(2)} A${r1},${r1} 0 ${lg} 0 ${x4.toFixed(2)},${y4.toFixed(2)}Z`;
+}
+
+// ── Tooltip ────────────────────────────────────────────────────────────
+function SBTooltip({ tip }) {
+  if (!tip) return null;
+  const fav = tip.variance < 0;
+  return (
+    <div style={{
+      position:'fixed', left:tip.px+14, top:tip.py-10,
+      background:SB_NAVY, color:'#fff', padding:'8px 13px',
+      fontSize:12, lineHeight:1.7, pointerEvents:'none', zIndex:300,
+      boxShadow:'0 4px 16px rgba(0,0,0,0.35)', maxWidth:240,
+      border:'1px solid rgba(255,255,255,0.12)',
+    }}>
+      <div style={{ fontWeight:600, fontSize:13, marginBottom:2 }}>{tip.label}</div>
+      <div style={{ color:fav?'#72D4A0':'#E87878', fontWeight:700, fontVariantNumeric:'tabular-nums', fontSize:14 }}>
+        {fav?'−':'+'}{fmt.m(Math.abs(tip.variance))}
+      </div>
+      <div style={{ color:'rgba(255,255,255,0.6)', fontSize:11, marginTop:1 }}>
+        {tip.pctParent}% of {tip.parentLabel} · {tip.pctTotal}% of total
+      </div>
+      {tip.hint && <div style={{ color:'rgba(255,255,255,0.4)', fontSize:11, fontStyle:'italic' }}>{tip.hint}</div>}
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────
+// Props:
+//   items          – [{ cat, variance, vendors }]  — signed; positive=unfav, negative=fav
+//   totalAmount    – number to display in center (always positive)
+//   centerSign     – '+' | '−'
+//   centerColor    – css color for center value
+//   centerLabel    – small label above center value
+//   isDark         – bool, background is dark
+// Props:
+//   size      – SVG size in px (default 440; use 340 for compact left-column use)
+//   zoomed    – controlled zoom (cat name or null); if omitted, self-manages
+//   onZoom    – called when user clicks to zoom; required when zoomed is provided
+function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel, isDark,
+                        size, zoomed: zExt, onZoom, diverging }) {
+  const [zInt,    setZInt]    = useStateSB(null);
+  const [tooltip, setTooltip] = useStateSB(null);
+  const [hov,     setHov]     = useStateSB(null);
+  const controlled = onZoom !== undefined;
+  const zoomed    = controlled ? (zExt||null) : zInt;
+  const setZoomed = controlled ? onZoom : (c)=>{ setZInt(c); setTooltip(null); };
+
+  const data = items || [];
+  if (!data.length) return null;
+
+  const totalAbs = data.reduce((s,c) => s + Math.abs(c.variance), 0);
+  const SZ = size || 440;
+  const SC = SZ / 440;
+  const CX=SZ/2, CY=SZ/2, R0=Math.round(55*SC), R1=Math.round(125*SC), R2=Math.round(188*SC), W=SZ, H=SZ;
+
+  // Diverging scale for Net Position mode (computed at component scope for legend access)
+  const divCatScale = diverging ? Math.max(1, ...data.map(c => Math.abs(c.variance))) : 1;
+
+  // Build segments
+  const segs = [];
+  if (!zoomed) {
+    let angle = 0;
+    data.forEach((cat, ci) => {
+      const catSpan = totalAbs > 0 ? (Math.abs(cat.variance) / totalAbs) * 2 * Math.PI : 0;
+      const isUnfav = cat.variance > 0;
+      segs.push({
+        key:'c'+ci, type:'cat', label:cat.cat, variance:cat.variance,
+        parentLabel:'total', parentAbs:totalAbs,
+        d:arc(CX,CY,R0,R1,angle,angle+catSpan),
+        fill:diverging ? netDivColorSB(cat.variance, divCatScale, 0) : catColorSB(cat.cat,0,ci),
+        onClick:()=>setZoomed(cat.cat),
+        hint:'Click to drill into vendors',
+      });
+      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
+      let va = angle;
+      cat.vendors.forEach((vnd,vi) => {
+        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*catSpan : 0;
+        segs.push({
+          key:'v'+ci+'_'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
+          labelFull:vnd.name, variance:vnd.variance,
+          parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
+          d:arc(CX,CY,R1,R2,va,va+vSpan),
+          fill:diverging ? netDivColorSB(vnd.variance, divCatScale, 1) : catColorSB(cat.cat,1,vi),
+          onClick:()=>setZoomed(cat.cat),
+          hint:'Click to drill in',
+        });
+        va += vSpan;
+      });
+      angle += catSpan;
     });
-    return v;
-  }, [data.vendors, sortBy, sortDir, search, filter]);
-
-  function setSort(k) {
-    if (sortBy === k) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-    else { setSortBy(k); setSortDir('desc'); }
+  } else {
+    const cat = data.find(c=>c.cat===zoomed);
+    if (cat) {
+      const isUnfav = cat.variance > 0;
+      const divVndScale = diverging ? Math.max(1, ...cat.vendors.map(v => Math.abs(v.variance))) : 1;
+      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
+      let va = 0;
+      cat.vendors.forEach((vnd,vi) => {
+        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*2*Math.PI : 0;
+        segs.push({
+          key:'zv'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
+          labelFull:vnd.name, variance:vnd.variance,
+          parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
+          d:arc(CX,CY,R0,R1,va,va+vSpan),
+          fill:diverging ? netDivColorSB(vnd.variance, divVndScale, 0) : catColorSB(zoomed,1,vi), onClick:null,
+        });
+        const divCtScale = diverging ? Math.max(1, ...vnd.contracts.map(c => Math.abs(c.variance))) : 1;
+        const vndAbsCt = vnd.contracts.reduce((s,c)=>s+Math.abs(c.variance),0);
+        let ca = va;
+        vnd.contracts.forEach((ct,ci) => {
+          const cSpan = vndAbsCt > 0 ? (Math.abs(ct.variance)/vndAbsCt)*vSpan : 0;
+          segs.push({
+            key:'zc'+vi+'_'+ci, type:'contract',
+            label:ct.name.length>34?ct.name.slice(0,33)+'…':ct.name,
+            labelFull:ct.name, variance:ct.variance,
+            parentLabel:vnd.name.length>18?vnd.name.slice(0,17)+'…':vnd.name,
+            parentAbs:Math.abs(vnd.variance),
+            d:arc(CX,CY,R1,R2,ca,ca+cSpan),
+            fill:diverging ? netDivColorSB(ct.variance, divCtScale, 1) : catColorSB(zoomed,2,ci), onClick:null,
+          });
+          ca += cSpan;
+        });
+        va += vSpan;
+      });
+    }
   }
 
-  const top10ByActual = data.vendors.slice().sort((a,b) => b.actual - a.actual).slice(0,10);
-  const top10ByForecast = data.vendors.slice().sort((a,b) => b.forecast - a.forecast).slice(0,10);
+  function onMove(e, seg) {
+    const pP = seg.parentAbs>0?(Math.abs(seg.variance)/seg.parentAbs*100).toFixed(1):'0.0';
+    const pT = totalAbs>0?(Math.abs(seg.variance)/totalAbs*100).toFixed(1):'0.0';
+    setHov(seg.key);
+    setTooltip({ px:e.clientX, py:e.clientY, label:seg.labelFull||seg.label,
+      variance:seg.variance, pctParent:pP, pctTotal:pT, parentLabel:seg.parentLabel, hint:seg.hint||null });
+  }
+  function onLeave() { setHov(null); setTooltip(null); }
 
-  // Top 10 by Annual Budget — for the Annual Budget vs Year-End Forecast chart
-  const top10ByBudget = data.vendors.slice().sort((a,b) => b.budget - a.budget).slice(0,10);
-  const totalBudget = data.vendors.reduce((s,v) => s + v.budget, 0) || 1;
+  const zCatLgd = zoomed ? data.find(c=>c.cat===zoomed) : null;
+  const divLgdVScale = (diverging && zCatLgd) ? Math.max(1, ...zCatLgd.vendors.map(v => Math.abs(v.variance))) : 1;
+  const legendItems = zoomed
+    ? (data.find(c=>c.cat===zoomed)?.vendors||[]).map((v,i)=>({ label:v.name, variance:v.variance,
+        color: diverging ? netDivColorSB(v.variance, divLgdVScale, 0) : catColorSB(zoomed,1,i) }))
+    : data.map((c,i)=>({ label:c.cat, variance:c.variance,
+        color: diverging ? netDivColorSB(c.variance, divCatScale, 0) : catColorSB(c.cat,0,i),
+        onClick:()=>setZoomed(c.cat) }));
 
-  // Risks & Opportunities by Vendor — for the executive view
-  const roByVendor = data.vendors
-    .filter(v => Math.abs(v.net) > 100 || v.risk > 0 || Math.abs(v.opp) > 0)
-    .sort((a,b) => Math.abs(b.net) - Math.abs(a.net))
-    .slice(0, 12);
+  const bg  = isDark ? 'transparent' : '#F9F8F5';
+  const lgC = isDark ? 'rgba(255,255,255,0.82)' : 'var(--antares-soft-black)';
+  const sgC = isDark ? 'var(--antares-stone-gray)' : 'var(--antares-stone-gray)';
+
+  const compact = SZ < 400;
 
   return (
-    <div>
-      {/* Annual Budget vs Year-End Forecast — Top 10 Vendors */}
-      <div className="card mb-4">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Annual Budget vs Year-End Forecast – Top 10 Vendors</div>
-            <div className="card-sub">Top 10 vendors ranked by Annual Budget · descending</div>
-          </div>
-          <div className="flex gap-3 fs-tiny text-stone">
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#333C66',display:'inline-block'}}/>annual budget</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#6699FF',display:'inline-block'}}/>year-end forecast</span>
-          </div>
-        </div>
-        {(() => {
-          const max = Math.max(...top10ByBudget.map(v => Math.max(v.budget, v.budget + v.net)), 1);
-          return (
-            <div>
-              {top10ByBudget.map(v => {
-                const yef = v.budget + v.net;
-                const bw = (v.budget / max) * 100;
-                const fw = (yef / max) * 100;
-                const over = yef > v.budget;
-                return (
-                  <div key={v.vendor} style={{display:'grid', gridTemplateColumns:'200px 1fr 220px', gap:12, alignItems:'center', padding:'8px 0', cursor:'pointer'}} onClick={() => setSelected(v)}>
-                    <div style={{fontWeight:600, color:'var(--antares-signature-navy)', fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{v.vendor}</div>
-                    <div style={{display:'grid', gridTemplateRows:'1fr 1fr', gap:3}}>
-                      <div style={{position:'relative', height:14, background:'#FAFAF8'}}>
-                        <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${bw}%`, background:'#333C66'}} />
-                      </div>
-                      <div style={{position:'relative', height:14, background:'#FAFAF8'}}>
-                        <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${fw}%`, background: over ? 'var(--risk-red)' : '#6699FF'}} />
-                      </div>
-                    </div>
-                    <div className="num text-right tabular fs-small" style={{display:'flex', flexDirection:'column', gap:2}}>
-                      <span style={{color:'var(--antares-signature-navy)', fontWeight:600}}>{fmt.k(v.budget)}</span>
-                      <span style={{color: over ? 'var(--risk-red)' : 'var(--antares-bright-blue-600)', fontWeight:600}}>{fmt.k(yef)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* YTD Risks & Opportunities by Vendor — Executive */}
-      <div className="card mb-4">
-        <div className="card-header">
-          <div>
-            <div className="card-title">YTD Risks & Opportunities by Vendor</div>
-            <div className="card-sub">Net position per vendor · top 12 by absolute exposure</div>
-          </div>
-          <div className="flex gap-3 fs-tiny text-stone">
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#B23A3A',display:'inline-block'}}/>risk (unfavorable)</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#2F7A4D',display:'inline-block'}}/>opp (favorable)</span>
-          </div>
-        </div>
-        {(() => {
-          const max = Math.max(...roByVendor.map(v => Math.max(v.risk, Math.abs(v.opp))), 1);
-          return (
-            <div>
-              {roByVendor.map(v => {
-                const riskW = (v.risk / max) * 50;
-                const oppW = (Math.abs(v.opp) / max) * 50;
-                return (
-                  <div key={v.vendor} style={{display:'grid', gridTemplateColumns:'200px 1fr 110px', gap:12, alignItems:'center', padding:'8px 0', cursor:'pointer'}} onClick={() => setSelected(v)}>
-                    <div style={{fontWeight:600, color:'var(--antares-signature-navy)', fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{v.vendor}</div>
-                    <div style={{position:'relative', height:22, background:'#FAFAF8'}}>
-                      <div style={{position:'absolute', left:'50%', top:0, bottom:0, width:1, background:'var(--antares-stone-gray-200)'}} />
-                      {v.risk > 0 && (
-                        <div style={{position:'absolute', right:'50%', top:0, bottom:0, width:`${riskW}%`, background:'var(--risk-red)', display:'flex', alignItems:'center', justifyContent:'flex-start', paddingLeft:6}}>
-                          <span style={{color:'#fff', fontSize:11, fontWeight:600, fontVariantNumeric:'tabular-nums'}}>{fmt.k(v.risk)}</span>
-                        </div>
-                      )}
-                      {Math.abs(v.opp) > 0 && (
-                        <div style={{position:'absolute', left:'50%', top:0, bottom:0, width:`${oppW}%`, background:'var(--opp-green)', display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:6}}>
-                          <span style={{color:'#fff', fontSize:11, fontWeight:600, fontVariantNumeric:'tabular-nums'}}>{fmt.k(Math.abs(v.opp))}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="num text-right tabular" style={{fontWeight:600, color: v.net > 0 ? 'var(--risk-red)' : v.net < 0 ? 'var(--opp-green)' : 'var(--antares-stone-gray)'}}>
-                      Net {Math.abs(v.net) < 1 ? '$0' : fmt.signed(v.net)}
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="flex justify-between fs-tiny text-stone mt-3" style={{borderTop:'1px solid var(--grid-line)', paddingTop: 8}}>
-                <span>← unfavorable variance (risk)</span>
-                <span style={{color:'var(--antares-stone-gray)'}}>$0</span>
-                <span>favorable variance (opp) →</span>
-              </div>
-            </div>
-          );
-        })()}
-      </div>
-
-      {/* Two ranking cards */}
-      <div className="row r-2-eq">
-        <RankingCard title="Top Vendors by YTD Actuals" subtitle="largest jan–mar spend" vendors={top10ByActual} metric="actual" onPick={setSelected} />
-        <RankingCard title="Top Vendors by 2026 Forecast" subtitle="largest projected full-year spend" vendors={top10ByForecast} metric="forecast" onPick={setSelected} />
-      </div>
-
-      {/* Vendor table */}
-      <div className="card mt-4">
-        <div className="card-header">
-          <div>
-            <div className="card-title">All Vendors</div>
-            <div className="card-sub">{sorted.length} vendors · click any row for monthly drill-down</div>
-          </div>
-          <div className="flex gap-3 items-center">
-            <div className="chips">
-              <button className={`chip ${filter==='all'?'active':''}`} onClick={()=>setFilter('all')}>All</button>
-              <button className={`chip ${filter==='risk'?'active':''}`} onClick={()=>setFilter('risk')}>Risk only</button>
-              <button className={`chip ${filter==='opp'?'active':''}`} onClick={()=>setFilter('opp')}>Opp only</button>
-              <button className={`chip ${filter==='over'?'active':''}`} onClick={()=>setFilter('over')}>Over budget</button>
-            </div>
-            <div className="search-box">
-              <Icon name="search" size={14} color="#807E7A" />
-              <input type="text" placeholder="Search vendor…" value={search} onChange={e=>setSearch(e.target.value)} />
-            </div>
-          </div>
-        </div>
-        <div style={{overflowX:'auto'}}>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th className="sortable" onClick={()=>setSort('vendor')}>Vendor {sortBy==='vendor' && <span className="sort-arrow">{sortDir==='asc'?'↑':'↓'}</span>}</th>
-                <th>Domain</th>
-                <th className="num">Budget %</th>
-                <th className="num sortable" onClick={()=>setSort('budget')}>Budget {sortBy==='budget' && <span className="sort-arrow">{sortDir==='asc'?'↑':'↓'}</span>}</th>
-                <th className="num sortable" onClick={()=>setSort('actual')}>YTD Actual {sortBy==='actual' && <span className="sort-arrow">{sortDir==='asc'?'↑':'↓'}</span>}</th>
-                <th className="num">Budget Consumption %</th>
-                <th className="num sortable" onClick={()=>setSort('forecast')}>Forecast {sortBy==='forecast' && <span className="sort-arrow">{sortDir==='asc'?'↑':'↓'}</span>}</th>
-                <th className="num">Risk</th>
-                <th className="num">Opp</th>
-                <th className="num sortable" onClick={()=>setSort('net')}>Net Position {sortBy==='net' && <span className="sort-arrow">{sortDir==='asc'?'↑':'↓'}</span>}</th>
-                <th className="num">Year-End Forecast</th>
-                <th>Trend</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map(v => {
-                const consumed = v.budget > 0 ? (v.actual / v.budget * 100) : 0;
-                const budgetPct = totalBudget > 0 ? (v.budget / totalBudget * 100) : 0;
-                const yef = v.budget + v.net;
-                return (
-                  <tr key={v.vendor} className={`clickable ${selected?.vendor === v.vendor ? 'selected' : ''}`} onClick={() => setSelected(v)}>
-                    <td className="vendor-name">{v.vendor}</td>
-                    <td className="fs-small text-stone" style={{maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{(v.domains[0] || '—').replace(/, /g, ', ')}</td>
-                    <td className="num">{budgetPct.toFixed(1)}%</td>
-                    <td className="num">{fmt.k(v.budget)}</td>
-                    <td className="num">{fmt.k(v.actual)}</td>
-                    <td className="num">{consumed.toFixed(1)}%</td>
-                    <td className="num">{fmt.k(v.forecast)}</td>
-                    <td className={`num ${v.risk > 0 ? 'neg' : 'zero'}`}>{v.risk > 0 ? fmt.k(v.risk) : '—'}</td>
-                    <td className={`num ${v.opp < 0 ? 'pos' : 'zero'}`}>{v.opp < 0 ? fmt.k(Math.abs(v.opp)) : '—'}</td>
-                    <td className={`num ${v.net > 100 ? 'neg' : v.net < -100 ? 'pos' : 'zero'}`}>{Math.abs(v.net) < 1 ? '—' : fmt.signed(v.net)}</td>
-                    <td className={`num ${yef > v.budget ? 'neg' : ''}`} style={{fontWeight:500}}>{fmt.k(yef)}</td>
-                    <td><Sparkline ac={v.monthlyAC} fc={v.monthlyFC} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {selected && <VendorDrill vendor={selected} onClose={() => setSelected(null)} />}
-    </div>
-  );
-}
-
-function RankingCard({ title, subtitle, vendors, metric, onPick }) {
-  const max = Math.max(...vendors.map(v => v[metric]));
-  return (
-    <div className="card">
-      <div className="card-header">
-        <div>
-          <div className="card-title">{title}</div>
-          <div className="card-sub">{subtitle}</div>
-        </div>
-      </div>
-      {vendors.map((v, i) => (
-        <div className="bar-row" key={v.vendor} onClick={() => onPick(v)} style={{cursor:'pointer'}}>
-          <div className="label">
-            <span style={{color:'var(--antares-stone-gray)', marginRight: 6, fontVariantNumeric:'tabular-nums'}}>{String(i+1).padStart(2,'0')}</span>
-            <span style={{fontWeight: 500}}>{v.vendor}</span>
-          </div>
-          <div className="bar-track">
-            <div className="bar-fill" style={{width: `${(v[metric]/max)*100}%`}} />
-          </div>
-          <div className="num">{fmt.k(v[metric])}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function VendorDrill({ vendor: v, onClose }) {
-  const max = Math.max(...v.monthlyAC, ...v.monthlyFC, 1);
-  const consumed = v.budget > 0 ? (v.actual / v.budget * 100) : 0;
-  return (
-    <div className="drill-overlay" onClick={onClose}>
-      <div className="drill-panel" onClick={e => e.stopPropagation()}>
-        <div className="drill-head">
-          <button className="drill-close" onClick={onClose}>✕ close</button>
-          <div className="ec section-h-sm" style={{textTransform:'uppercase',letterSpacing:'0.12em',fontSize:11,color:'var(--antares-stone-gray)',fontWeight:700}}>Vendor Drill-Down</div>
-          <h2>{v.vendor}</h2>
-          <div className="meta">
-            <span>{v.domains.join(' · ') || '—'}</span>
-            <span>·</span>
-            <span>Owner: {v.domainOwners.join(', ') || '—'}</span>
-            <span>·</span>
-            <span>{v.lineItems.length} line item{v.lineItems.length===1?'':'s'}</span>
-          </div>
-        </div>
-        <div className="drill-body">
-          <div className="drill-kpi-grid">
-            <div className="drill-kpi"><div className="l">Budget</div><div className="v">{fmt.m2(v.budget)}</div></div>
-            <div className="drill-kpi"><div className="l">YTD Actual</div><div className="v">{fmt.m2(v.actual)}</div></div>
-            <div className="drill-kpi"><div className="l">Forecast</div><div className="v">{fmt.m2(v.forecast)}</div></div>
-            <div className="drill-kpi"><div className="l">Net Opp/Risk</div><div className={`v ${v.net > 100 ? 'risk' : v.net < -100 ? 'opp' : ''}`}>{Math.abs(v.net) < 1 ? '—' : fmt.signed2(v.net)}</div></div>
-          </div>
-
-          <div className="section-h" style={{marginBottom:10}}>Monthly Breakdown</div>
-          {(() => {
-            // Build a per-month table: Actuals row, Forecast row, Variance row
-            const ytdMonths = 3; // jan-mar are actuals
-            const totalAC = v.monthlyAC.reduce((a,b)=>a+b,0);
-            const totalFC = v.monthlyFC.reduce((a,b)=>a+b,0);
-            const variance = v.monthlyAC.map((ac, i) => i < ytdMonths ? (ac - v.monthlyFC[i]) : 0);
-            const totalVar = variance.reduce((a,b)=>a+b,0);
-            return (
-              <div style={{overflowX:'auto'}}>
-                <table className="tbl tbl-monthly">
-                  <thead>
-                    <tr>
-                      <th></th>
-                      {MONTHS.map(m => <th key={m} className="num" style={{textAlign:'center', fontWeight:600}}>{m.charAt(0).toUpperCase()+m.slice(1)}</th>)}
-                      <th className="num" style={{fontWeight:600}}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Actuals</td>
-                      {v.monthlyAC.map((ac, i) => (
-                        <td key={i} className="num" style={{color: ac > 0 ? 'var(--antares-signature-navy)' : 'var(--antares-stone-gray)'}}>
-                          {ac > 0 ? fmt.k(ac) : '—'}
-                        </td>
-                      ))}
-                      <td className="num" style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>{fmt.k(totalAC)}</td>
-                    </tr>
-                    <tr>
-                      <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Forecast</td>
-                      {v.monthlyFC.map((fc, i) => (
-                        <td key={i} className="num" style={{color: fc > 0 ? 'var(--antares-bright-blue-600)' : 'var(--antares-stone-gray)'}}>
-                          {fc > 0 ? fmt.k(fc) : '—'}
-                        </td>
-                      ))}
-                      <td className="num" style={{fontWeight:600, color:'var(--antares-bright-blue-600)'}}>{fmt.k(totalFC)}</td>
-                    </tr>
-                    <tr style={{borderTop:'1px solid var(--grid-line)'}}>
-                      <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Variance</td>
-                      {variance.map((vr, i) => {
-                        const fc = v.monthlyFC[i];
-                        const ac = v.monthlyAC[i];
-                        if (i >= ytdMonths) {
-                          return <td key={i} className="num" style={{color:'var(--antares-stone-gray)'}}>—</td>;
-                        }
-                        if (Math.abs(vr) < 1) return <td key={i} className="num" style={{color:'var(--antares-stone-gray)'}}>—</td>;
-                        return (
-                          <td key={i} className="num" style={{color: vr > 0 ? 'var(--risk-red)' : 'var(--opp-green)', fontWeight:500}}>
-                            {fmt.signed(vr)}
-                          </td>
-                        );
-                      })}
-                      <td className="num" style={{fontWeight:600, color: totalVar > 0 ? 'var(--risk-red)' : totalVar < 0 ? 'var(--opp-green)' : 'var(--antares-stone-gray)'}}>
-                        {Math.abs(totalVar) < 1 ? '—' : fmt.signed(totalVar)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
-          <div className="flex gap-4 fs-tiny text-stone mt-3">
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'var(--antares-signature-navy)',display:'inline-block'}}/>Actuals (Jan – Mar)</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'var(--antares-bright-blue-600)',display:'inline-block'}}/>Forecast (Apr – Dec)</span>
-            <span className="flex items-center gap-2"><span style={{color:'var(--risk-red)',fontWeight:700}}>+</span>Unfavorable variance</span>
-            <span className="flex items-center gap-2"><span style={{color:'var(--opp-green)',fontWeight:700}}>−</span>Favorable variance</span>
-          </div>
-
-          {v.lineItems.length > 0 && (
-            <div className="mt-5">
-              <div className="section-h" style={{marginBottom:10}}>Line Items</div>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Application / Project</th>
-                    <th>Treatment</th>
-                    <th className="num">Budget</th>
-                    <th className="num">Actual</th>
-                    <th className="num">Forecast</th>
-                    <th className="num">Net</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {v.lineItems.map((li, i) => (
-                    <tr key={i}>
-                      <td>
-                        <div style={{fontWeight:500, color:'var(--antares-signature-navy)'}}>{li.application || li.subCategory || '—'}</div>
-                        <div className="fs-tiny text-stone">{li.project}</div>
-                      </td>
-                      <td className="fs-small text-stone">{li.treatment || '—'}</td>
-                      <td className="num">{fmt.k(li.budget)}</td>
-                      <td className="num">{fmt.k(li.actual)}</td>
-                      <td className="num">{fmt.k(li.forecast)}</td>
-                      <td className={`num ${li.net > 100 ? 'neg' : li.net < -100 ? 'pos' : 'zero'}`}>{Math.abs(li.net) < 1 ? '—' : fmt.signed(li.net)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+    <div style={{ position:'relative' }} onMouseLeave={onLeave}>
+      <SBTooltip tip={tooltip} />
+      <div style={{ display:'flex', gap:compact?12:24, alignItems:'flex-start', flexWrap:'wrap' }}>
+        <div style={{ flexShrink:0, position:'relative' }}>
+          {zoomed && (
+            <button onClick={()=>{setZoomed(null);setTooltip(null);}} style={{
+              position:'absolute', top:6, right:6, zIndex:2, background:'none',
+              border:'1px solid rgba(255,255,255,0.22)', borderRadius:2,
+              padding:'3px 10px', fontSize:11, cursor:'pointer',
+              color:'rgba(255,255,255,0.7)', fontFamily:SB_SANS,
+            }}>← back</button>
           )}
-
-          {v.lineItems.some(li => li.notes) && (
-            <div className="mt-5">
-              <div className="section-h" style={{marginBottom:10}}>Notes</div>
-              <ul style={{margin:0, paddingLeft:18, listStyle:'disc'}}>
-                {v.lineItems.filter(li => li.notes).map((li, i) => (
-                  <li key={i} className="fs-small" style={{marginBottom:6, color:'var(--antares-soft-black)'}}>
-                    <span className="text-stone" style={{fontWeight:500}}>{li.application || li.project}:</span>
-                    {' '}{li.notes}
-                  </li>
-                ))}
-              </ul>
+          <svg width={W} height={H} style={{ display:'block' }}>
+            <circle cx={CX} cy={CY} r={R2+4} fill={bg} />
+            {segs.map(s=>(
+              <path key={s.key} d={s.d} fill={s.fill}
+                fillOpacity={hov===s.key?1:0.82} stroke={isDark?'rgba(0,0,0,0.35)':'#fff'} strokeWidth="1.5"
+                style={{ cursor:s.onClick?'pointer':'default', transition:'fill-opacity 0.1s' }}
+                onMouseMove={e=>onMove(e,s)} onMouseEnter={e=>onMove(e,s)} onClick={s.onClick}
+              />
+            ))}
+            <circle cx={CX} cy={CY} r={R0-3} fill={isDark?'rgba(0,0,0,0.4)':'#fff'}
+              stroke={isDark?'rgba(255,255,255,0.12)':'var(--color-border)'} strokeWidth="1" />
+            <text x={CX} y={CY-14} textAnchor="middle" fontFamily={SB_SERIF} fontWeight="800"
+              fontSize="9" fill={isDark?'rgba(255,255,255,0.48)':'var(--antares-stone-gray)'}
+              letterSpacing="0.2em" style={{ textTransform:'uppercase' }}>
+              {zoomed ? (data.find(c=>c.cat===zoomed)?.cat||'').slice(0,14) : centerLabel}
+            </text>
+            <text x={CX} y={CY+7} textAnchor="middle" fontFamily={SB_SERIF} fontWeight="600"
+              fontSize="15" fill={zoomed?(data.find(c=>c.cat===zoomed)?.variance>0?SB_RED:SB_GREEN):centerColor}>
+              {zoomed
+                ? ((data.find(c=>c.cat===zoomed)?.variance||0)<0?'−':'+') + fmt.m(Math.abs(data.find(c=>c.cat===zoomed)?.variance||0))
+                : centerSign + fmt.m(totalAmount)}
+            </text>
+            <text x={CX} y={CY+21} textAnchor="middle" fontFamily={SB_SANS} fontSize="9"
+              fill={isDark?'rgba(255,255,255,0.38)':'var(--antares-stone-gray)'}>
+              {zoomed ? 'click ← to reset' : 'click segment to drill'}
+            </text>
+          </svg>
+        </div>
+        <div style={{ paddingTop:14, minWidth:190, maxWidth:240 }}>
+          <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
+            color:isDark?'rgba(255,255,255,0.4)':SB_NAVY, fontFamily:SB_SERIF, marginBottom:12 }}>
+            {zoomed ? zoomed + ' — Vendors' : 'Categories'}
+          </div>
+          {legendItems.map((item,i)=>(
+            <div key={i} onClick={item.onClick}
+              style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6,
+                cursor:item.onClick?'pointer':'default', opacity:1, transition:'opacity 0.1s' }}
+              onMouseEnter={e=>{if(item.onClick)e.currentTarget.style.opacity='0.7';}}
+              onMouseLeave={e=>{e.currentTarget.style.opacity='1';}}>
+              <div style={{ width:11, height:11, background:item.color, flexShrink:0, borderRadius:2 }} />
+              <div style={{ fontSize:12, color:lgC, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {item.label}
+              </div>
+              <div style={{ fontSize:12, fontWeight:600, fontVariantNumeric:'tabular-nums', fontFamily:SB_SANS,
+                flexShrink:0, color:item.variance>0?SB_RED:SB_GREEN }}>
+                {item.variance>0?'+':'−'}{fmt.k(Math.abs(item.variance))}
+              </div>
+            </div>
+          ))}
+          {!zoomed && (
+            <div style={{ marginTop:12, paddingTop:8, borderTop:`1px solid ${isDark?'rgba(255,255,255,0.1)':'var(--color-border)'}`,
+              fontSize:11, color:sgC, lineHeight:1.6 }}>
+              Inner: categories<br/>
+              Outer: vendors<br/>
+              Click to drill in
             </div>
           )}
         </div>
@@ -390,5 +281,4 @@ function VendorDrill({ vendor: v, onClose }) {
   );
 }
 
-window.VendorsTab = VendorsTab;
-window.VendorDrill = VendorDrill;
+window.SunburstView = SunburstView;
