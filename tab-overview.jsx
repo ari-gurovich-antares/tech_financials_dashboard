@@ -491,6 +491,7 @@ function OverviewTab({ data }) {
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
         marginBottom: 16, flexWrap: 'wrap',
+        justifyContent: 'center',
       }}>
         <span style={{
           fontFamily: OV.serif, fontWeight: 800, fontSize: 10,
@@ -526,20 +527,60 @@ function OverviewTab({ data }) {
       </div>
 
       {/* ══ ROW 1 — 4 PRIMARY KPIs ══════════════════════════════════════ */}
-      <div style={{ ...CARD, ...MB20, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)' }}>
+      <style>{`
+        .kpi-flip { perspective: 900px; }
+        .kpi-flip-inner {
+          position: relative; width: 100%; height: 100%;
+          transition: transform 0.52s cubic-bezier(0.4, 0.2, 0.2, 1);
+          transform-style: preserve-3d;
+        }
+        .kpi-flip:hover .kpi-flip-inner { transform: rotateY(180deg); }
+        .kpi-flip-front, .kpi-flip-back {
+          position: absolute; inset: 0;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          padding: 28px; text-align: center;
+        }
+        .kpi-flip-back {
+          transform: rotateY(180deg);
+          background: #333C66;
+        }
+      `}</style>
+      <div style={{ ...CARD, ...MB20, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', overflow: 'hidden' }}>
         {[
           { label: 'annual budget',      val: fmt.m(kpi.budget),    sub: '2026 approved budget' },
           { label: 'year-end forecast',  val: fmt.m(kpi.forecast),  sub: 'actuals + remaining forecast' },
           { label: 'ytd actual spend',   val: fmt.m(kpi.actual),    sub: `${kpi.budget > 0 ? (kpi.actual / kpi.budget * 100).toFixed(1) : 0}% of budget consumed` },
           { label: 'remaining forecast', val: fmt.m(kpi.remaining), sub: 'balance to year-end' },
         ].map((k, i) => (
-          <div key={i} style={{ padding: '32px 28px 28px', borderLeft: i > 0 ? `1px solid ${OV.border}` : 'none' }}>
-            <OvEyebrow text={k.label} />
-            <div style={{
-              fontFamily: OV.serif, fontWeight: 600, fontSize: 40, lineHeight: 1,
-              letterSpacing: '-0.01em', color: OV.navy, fontVariantNumeric: 'tabular-nums',
-            }}>{k.val}</div>
-            <div style={{ fontSize: 12, color: OV.stone, marginTop: 9 }}>{k.sub}</div>
+          <div key={i} className="kpi-flip" style={{ borderLeft: i > 0 ? `1px solid ${OV.border}` : 'none', height: 128 }}>
+            <div className="kpi-flip-inner">
+              <div className="kpi-flip-front">
+                <OvEyebrow text={k.label} />
+                <div style={{
+                  fontFamily: OV.serif, fontWeight: 600, fontSize: 40, lineHeight: 1,
+                  letterSpacing: '-0.01em', color: OV.navy, fontVariantNumeric: 'tabular-nums',
+                }}>{k.val}</div>
+              </div>
+              <div className="kpi-flip-back">
+                <div style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.2em',
+                  textTransform: 'lowercase', color: 'rgba(255,255,255,0.45)',
+                  marginBottom: 10, fontFamily: OV.serif,
+                }}>{k.label}</div>
+                <div style={{
+                  fontSize: 15, fontWeight: 500, color: 'rgba(255,255,255,0.9)',
+                  lineHeight: 1.35, fontFamily: OV.sans,
+                }}>{k.sub}</div>
+                <div style={{
+                  marginTop: 14, fontFamily: OV.serif, fontWeight: 600, fontSize: 24,
+                  color: 'rgba(255,255,255,0.28)', fontVariantNumeric: 'tabular-nums',
+                  letterSpacing: '-0.01em',
+                }}>{k.val}</div>
+              </div>
+            </div>
           </div>
         ))}
       </div>
@@ -556,9 +597,9 @@ function OverviewTab({ data }) {
           onClick={() => setOpenPanel({ type: 'net' })}
           style={{
             padding: '28px 28px 24px', background: OV.navy, border: 'none', borderRight: `1px solid rgba(255,255,255,0.15)`,
-            textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+            textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit',
             transition: 'filter 0.12s', width: '100%', display: 'flex',
-            flexDirection: 'column', justifyContent: 'center',
+            flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
           }}
           onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.15)'}
           onMouseLeave={e => e.currentTarget.style.filter = 'none'}
@@ -590,8 +631,9 @@ function OverviewTab({ data }) {
               borderTop: `3px solid ${OV.green}`,
               borderRight: 'none', borderLeft: 'none',
               borderBottom: `1px solid ${OV.border}`,
-              background: 'transparent', textAlign: 'left', cursor: 'pointer',
+              background: 'transparent', textAlign: 'center', cursor: 'pointer',
               fontFamily: 'inherit', transition: 'background 0.12s', width: '100%',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             }}
             onMouseEnter={e => e.currentTarget.style.background = '#EAF4EE'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -616,8 +658,9 @@ function OverviewTab({ data }) {
               flex: 1, padding: '24px 28px 20px',
               borderTop: `3px solid ${OV.red}`,
               borderRight: 'none', borderLeft: 'none', borderBottom: 'none',
-              background: 'transparent', textAlign: 'left', cursor: 'pointer',
+              background: 'transparent', textAlign: 'center', cursor: 'pointer',
               fontFamily: 'inherit', transition: 'background 0.12s', width: '100%',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             }}
             onMouseEnter={e => e.currentTarget.style.background = '#FBEDED'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}

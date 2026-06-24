@@ -41,7 +41,7 @@ function App({ data: initialData }) {
     document.body.className = `mood-${t.mood} density-${t.density}`;
   }, [t.mood, t.density]);
 
-  // ── Handle workbook upload — persist, update state, re-mount overview ──
+  // ── Handle workbook upload — update current view only, do not persist stale browser data ──
   function handleUpload(filename, parsedData) {
     const now = new Date();
     const info = {
@@ -115,7 +115,7 @@ function App({ data: initialData }) {
       {/* ── TOP BAR ───────────────────────────────────────────────────── */}
       <div className="topbar">
         <div className="brand">
-          <img src={(window.__resources && window.__resources.antaresLogo) || 'assets/logos/antares-primary-white.png'} alt="Antares" />
+          <img src={(window.__resources && window.__resources.antaresLogo) || 'design-system/antares-primary-white.png'} alt="Antares" />
         </div>
         <div className="title-block">
           <div className="eyebrow">a n t a r e s &nbsp; c a p i t a l</div>
@@ -153,29 +153,6 @@ function App({ data: initialData }) {
         </div>
       </div>
 
-      {/* ── PORTFOLIO SCOPE BAR ──────────────────────────────────────── */}
-      <div style={{
-        background: '#F0EEE9',
-        borderBottom: '1px solid var(--color-border)',
-        padding: '10px 28px', display: 'flex', alignItems: 'center', gap: 10,
-        minHeight: 44,
-      }}>
-        <span style={{ fontSize:12, fontFamily:'var(--font-sans)', color:'var(--antares-stone-gray)', fontWeight:500 }}>
-          Full Technology Portfolio
-        </span>
-        <span style={{ fontSize:11, color:'var(--color-border)' }}>·</span>
-        <span style={{ fontSize:11, fontFamily:'var(--font-sans)', color:'var(--antares-stone-gray)', fontStyle:'italic' }}>
-          Capitalization excluded · Amortization included
-        </span>
-        {sourceInfo && sourceInfo.filename && (
-          <>
-            <span style={{ fontSize:11, color:'var(--color-border)' }}>·</span>
-            <span style={{ fontSize:11, fontFamily:'var(--font-sans)', color:'var(--antares-stone-gray)', fontStyle:'italic' }}>
-              {sourceInfo.filename}
-            </span>
-          </>
-        )}
-      </div>
 
       {/* ── TAB BAR ──────────────────────────────────────────────────── */}
       <div className="tabs-bar">
@@ -241,7 +218,7 @@ function App({ data: initialData }) {
       console.warn('[boot] localStorage clear failed:', e.message);
     }
 
-    // ── 1. Always load the latest workbook from GitHub Pages.
+    // Always load the latest workbook from GitHub Pages with cache busting.
     try {
       const baseExcelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
       const sep = baseExcelUrl.includes('?') ? '&' : '?';
@@ -255,7 +232,7 @@ function App({ data: initialData }) {
       console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
     }
 
-    // ── 2. Fall back to financials.json
+    // Fall back to financials.json if the workbook cannot be loaded.
     if (!data) {
       const baseJsonUrl = (window.__resources && window.__resources.financialsJson) || 'data/financials.json';
       const sep = baseJsonUrl.includes('?') ? '&' : '?';

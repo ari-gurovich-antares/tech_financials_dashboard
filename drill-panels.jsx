@@ -184,6 +184,7 @@ function KPIDrillPanel({ mode, rawData, onClose }) {
               centerSign={sign} centerColor={accent} centerLabel={kpiLbl}
               isDark={true} size={360}
               zoomed={selCat} onZoom={pickCat}
+              hideLegend={true}
             />
           </div>
 
@@ -373,6 +374,7 @@ function NetDrillPanel({ onClose, rawData }) {
               isDark={true} size={360}
               zoomed={selCat} onZoom={pickCat}
               diverging={true}
+              hideLegend={true}
             />
           </div>
 

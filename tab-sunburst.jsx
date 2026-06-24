@@ -93,7 +93,7 @@ function SBTooltip({ tip }) {
 //   zoomed    – controlled zoom (cat name or null); if omitted, self-manages
 //   onZoom    – called when user clicks to zoom; required when zoomed is provided
 function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel, isDark,
-                        size, zoomed: zExt, onZoom, diverging }) {
+                        size, zoomed: zExt, onZoom, diverging, hideLegend }) {
   const [zInt,    setZInt]    = useStateSB(null);
   const [tooltip, setTooltip] = useStateSB(null);
   const [hov,     setHov]     = useStateSB(null);
@@ -229,23 +229,36 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
             ))}
             <circle cx={CX} cy={CY} r={R0-3} fill={isDark?'rgba(0,0,0,0.4)':'#fff'}
               stroke={isDark?'rgba(255,255,255,0.12)':'var(--color-border)'} strokeWidth="1" />
-            <text x={CX} y={CY-14} textAnchor="middle" fontFamily={SB_SERIF} fontWeight="800"
-              fontSize="9" fill={isDark?'rgba(255,255,255,0.48)':'var(--antares-stone-gray)'}
-              letterSpacing="0.2em" style={{ textTransform:'uppercase' }}>
-              {zoomed ? (data.find(c=>c.cat===zoomed)?.cat||'').slice(0,14) : centerLabel}
-            </text>
+            {(()=>{
+              const rawLbl = zoomed ? (data.find(c=>c.cat===zoomed)?.cat||'') : (centerLabel||'');
+              const words = rawLbl.trim().split(/\s+/).filter(Boolean);
+              const lines = words.length > 1
+                ? [words.slice(0,Math.ceil(words.length/2)).join(' '), words.slice(Math.ceil(words.length/2)).join(' ')]
+                : [rawLbl];
+              const topY = lines.length > 1 ? CY-22 : CY-14;
+              return (
+                <text textAnchor="middle" fontFamily={SB_SERIF} fontWeight="800"
+                  fontSize="8" fill={isDark?'rgba(255,255,255,0.48)':'var(--antares-stone-gray)'}
+                  letterSpacing="0.1em">
+                  {lines.map((ln,i)=>(
+                    <tspan key={i} x={CX} y={topY+i*11} style={{ textTransform:'uppercase' }}>{ln}</tspan>
+                  ))}
+                </text>
+              );
+            })()}
             <text x={CX} y={CY+7} textAnchor="middle" fontFamily={SB_SERIF} fontWeight="600"
               fontSize="15" fill={zoomed?(data.find(c=>c.cat===zoomed)?.variance>0?SB_RED:SB_GREEN):centerColor}>
               {zoomed
                 ? ((data.find(c=>c.cat===zoomed)?.variance||0)<0?'−':'+') + fmt.m(Math.abs(data.find(c=>c.cat===zoomed)?.variance||0))
                 : centerSign + fmt.m(totalAmount)}
             </text>
-            <text x={CX} y={CY+21} textAnchor="middle" fontFamily={SB_SANS} fontSize="9"
+            {!hideLegend && <text x={CX} y={CY+21} textAnchor="middle" fontFamily={SB_SANS} fontSize="9"
               fill={isDark?'rgba(255,255,255,0.38)':'var(--antares-stone-gray)'}>
               {zoomed ? 'click ← to reset' : 'click segment to drill'}
-            </text>
+            </text>}
           </svg>
         </div>
+        {!hideLegend && (
         <div style={{ paddingTop:14, minWidth:190, maxWidth:240 }}>
           <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
             color:isDark?'rgba(255,255,255,0.4)':SB_NAVY, fontFamily:SB_SERIF, marginBottom:12 }}>
@@ -276,6 +289,7 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
