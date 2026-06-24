@@ -359,6 +359,22 @@
     }
 
     const _result = buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd);
+
+    // Read-only SharePoint/backup copies can contain stale cached formula results.
+    // SheetJS reads cached formula values but does not recalculate formulas, so do
+    // not use the SUBTOTAL row's cached values for KPI cards. Keep the SUBTOTAL
+    // formula range for row scoping, but derive headline totals from parsed rows.
+    _result.workbookSubtotal = {
+      budget: _result.summary.budget,
+      actual: _result.summary.actual,
+      forecast: _result.summary.forecast,
+      remaining: _result.summary.remaining,
+      risk: _result.summary.risk,
+      opp: _result.summary.opp,
+      net: _result.summary.net,
+      absOpp: Math.abs(_result.summary.opp),
+    };
+
     const _s = _result.summary;
     const _ws = _result.workbookSubtotal;
     if (_ws) {
