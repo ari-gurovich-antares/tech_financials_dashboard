@@ -1,47 +1,1858 @@
-const EXEC_DRILL = {
-  "Labor/ T&M": [
-    { name: "Intelligent Business Platforms LLC", variance: 916752 },
-    { name: "Indus Valley Partners Corporation", variance: 807200 },
-    { name: "Andersen Tax Holdings", variance: 95033 },
-    { name: "Coforge DPA NA Inc.", variance: -52195 },
-    { name: "Cognizant Worldwide Limited", variance: -5540 },
-  ],
-  "Software": [
-    { name: "Finastra Technology, Inc", variance: 456079 },
-    { name: "MARKIT NORTH AMERICA, INC.", variance: 232488 },
-    { name: "Indus Valley Partners Corporation", variance: -215776 },
-    { name: "PactFi Inc.", variance: 132828 },
-    { name: "CME Group", variance: 92000 },
-    { name: "Allvue Systems, LLC", variance: 86226 },
-    { name: "Other", variance: -11411 },
-  ],
-  "MS": [
-    { name: "Coforge DPA NA Inc.", variance: 247000 },
-    { name: "Indus Valley Partners Corporation", variance: -21401 },
-    { name: "Virteva LLC", variance: -10000 },
-    { name: "Archetype Consulting, Inc.", variance: -7725 },
-    { name: "NewRocket, LLC", variance: -4330 },
-    { name: "Other", variance: -392 },
-  ],
-  "Infrastructure": [
-    { name: "CDW DIRECT LLC", variance: -11985 },
-    { name: "Cisco Systems, Inc.", variance: -1674 },
-    { name: "Other", variance: -712 },
-  ],
-  "Hardware": [
-    { name: "CDW DIRECT LLC", variance: 67802 },
-    { name: "SHI International Corp", variance: -8513 },
-  ],
-  "OOE": [
-    { name: "G Treasury SS, LLC", variance: 41250 },
-    { name: "Amortization/Multiple", variance: 19602 },
-    { name: "Norske Finansielle Referanser AS", variance: 15208 },
-    { name: "Bloomberg Finance L.P.", variance: -1821 },
-    { name: "Other", variance: 172 },
-  ],
-  "FPC": [
-    { name: "Indus Valley Partners Corporation", variance: -884000 },
-    { name: "MARKIT NORTH AMERICA, INC.", variance: -330000 },
-    { name: "Coforge DPA NA Inc.", variance: -139167 },
-  ],
-};
+{
+  "riskH": {
+    "total": 3509257.282763332,
+    "cats": [
+      {
+        "cat": "Labor/ T&M",
+        "amount": 1998687.3599999999,
+        "vendors": [
+          {
+            "name": "Intelligent Business Platforms LLC",
+            "amount": 940800,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": "T&M",
+                "amount": 940800,
+                "notes": "T&M- H2-2026 Risk"
+              }
+            ]
+          },
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": 807200,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": "Prj Mgmt T&M",
+                "amount": 279200,
+                "notes": "T&M IVP Mgmt (TOM)- Rahul & Vaibhav + 2"
+              },
+              {
+                "project": "T&M",
+                "application": "Prj Mgmt T&M",
+                "amount": 528000,
+                "notes": "T&M IVP Mgmt (TOM)- Rahul & Vaibhav + 2 for H2-2026 - Risk"
+              }
+            ]
+          },
+          {
+            "name": "Andersen Tax Holdings",
+            "amount": 140594,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 29498,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 2432,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 71440,
+                "notes": "Swati Yadav"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 37224,
+                "notes": "Danny's extra 1Rivet HC - Risk"
+              }
+            ]
+          },
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": 110093.35999999999,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 109043.35999999999,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 1050,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Software",
+        "amount": 1104594.6973333324,
+        "vendors": [
+          {
+            "name": "Finastra Technology, Inc",
+            "amount": 456079.3699999992,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": "LIQ - Loan IQ",
+                "amount": 456079.3699999992,
+                "notes": "Recurring License Fee/Maintenance for the period 1-Jan-2026 to 14-Jan-2026 and Subscription Fees for the period 15-Jan-2026 to 14-Jan-2027"
+              }
+            ]
+          },
+          {
+            "name": "MARKIT NORTH AMERICA, INC.",
+            "amount": 232487.96999999974,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 0.21999999973922968,
+                "notes": "RISK AUM-Potential Dec. Opp"
+              },
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 232487.75,
+                "notes": "WSO Web Services - Subs/ WSO Web/AUM/SubVar- Potential Risk"
+              }
+            ]
+          },
+          {
+            "name": "PactFi Inc.",
+            "amount": 132827.5,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Credit Apps",
+                "application": "PactFi Annual Platform Fee",
+                "amount": 132827.5,
+                "notes": "Year 1 of 3: 1/26/26 to 1/25/27 - Capitalizable"
+              }
+            ]
+          },
+          {
+            "name": "NewRocket, LLC",
+            "amount": 100631.95416666666,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "ServiceNow Agile Team + Various",
+                "amount": 100631.95416666666,
+                "notes": "Prepaid in 2025; to be renewed in Dec 2026-Prepaid in 2025; to be renewed in Dec 2026"
+              }
+            ]
+          },
+          {
+            "name": "CME Group",
+            "amount": 92000,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": "LIQ",
+                "amount": 92000,
+                "notes": "This was not part of initial budget"
+              }
+            ]
+          },
+          {
+            "name": "Allvue Systems, LLC",
+            "amount": 86226.11999999965,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Credit Apps",
+                "application": "BMS",
+                "amount": 86226.11999999965,
+                "notes": "Prepaid 2026"
+              }
+            ]
+          },
+          {
+            "name": "SALESFORCE COM INC",
+            "amount": 2252.8499999999985,
+            "contracts": [
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Tableau Creator (5) + Viewer (40) + Explorer (10)",
+                "amount": 2252.8499999999985,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Broadridge Output  Solutions",
+            "amount": 2000.5425000001123,
+            "contracts": [
+              {
+                "project": "Support - Asset Management Applications",
+                "application": "Centry CLO",
+                "amount": 2000.3075000001118,
+                "notes": "Quarterly Prepaid"
+              },
+              {
+                "project": "Support - Asset Management Applications",
+                "application": null,
+                "amount": 0.23500000000058208,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Macabacus, Inc.",
+            "amount": 83.84999999999968,
+            "contracts": [
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": "XLS Modeler - Annual",
+                "amount": 0.14999999999986358,
+                "notes": ""
+              },
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": "Suit License",
+                "amount": 83.69999999999982,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "SuperTrader, Inc.",
+            "amount": 2.0499999999883585,
+            "contracts": [
+              {
+                "project": "Support - Asset Management Applications",
+                "application": "Levpro",
+                "amount": 2.0499999999883585,
+                "notes": "Software (Prepaid)"
+              }
+            ]
+          },
+          {
+            "name": "Microsoft Corporation",
+            "amount": 0.536666666790552,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 0.31999999999970896,
+                "notes": "Monthly Incremental - Potential Opportunity-Monthly Incremental - Potential Opportunity"
+              },
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 0.216666666790843,
+                "notes": "MS Core-Prepaid"
+              }
+            ]
+          },
+          {
+            "name": "Lucid Software, Inc.",
+            "amount": 0.47149999999783176,
+            "contracts": [
+              {
+                "project": "Support - Tech Enablement 2026",
+                "application": "Lucidscale Team / Suite",
+                "amount": 0.24099999999998545,
+                "notes": "Lucid Suite"
+              },
+              {
+                "project": "Support - Tech Enablement 2026",
+                "application": "Lucidscale Team / Suite",
+                "amount": 0.23049999999784632,
+                "notes": "Lucid Suite and Cloud Accelerator"
+              }
+            ]
+          },
+          {
+            "name": "Litera",
+            "amount": 0.4499999999998181,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": "Litera Compare Desktop",
+                "amount": 0.4499999999998181,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "SHI International Corp",
+            "amount": 0.3125,
+            "contracts": [
+              {
+                "project": "Support - Enterprise Tech Helpdesk",
+                "application": "Adobe",
+                "amount": 0.3125,
+                "notes": "Adobe"
+              }
+            ]
+          },
+          {
+            "name": "Oracle America, Inc.",
+            "amount": 0.2999999999992724,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": "Oracle Java ",
+                "amount": 0.2999999999992724,
+                "notes": "LIQ Java"
+              }
+            ]
+          },
+          {
+            "name": "Siemens Industry Software, Inc.",
+            "amount": 0.2999999999956344,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Sales",
+                "application": null,
+                "amount": 0.2999999999956344,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": 0.11999999987892807,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 0.11999999987892807,
+                "notes": "Comprised of 7 different invoices - SmartNet, Prisma and PA until Jul'25; New Price effective Aug'25 for 5 yr contract\n5 years starting Aug is only Prisma and PA. No SmartNet."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "MS",
+        "amount": 247000,
+        "vendors": [
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": 247000,
+            "contracts": [
+              {
+                "project": "Support - QA CoE Management for Tech Horizontals",
+                "application": null,
+                "amount": 247000,
+                "notes": "QA SOW FPC - [KA - Feb23] - Updated forecast from Mar to Dec based on the new contract that superseeded the original one"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Hardware",
+        "amount": 81769.53,
+        "vendors": [
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": 75000,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 75000,
+                "notes": "2026 Laptops - Danny- Risk"
+              }
+            ]
+          },
+          {
+            "name": "SHI International Corp",
+            "amount": 6769.530000000001,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "Papercut SaaS Maintenance",
+                "amount": 6769.530000000001,
+                "notes": "Not part of original budget; risk added, category updated from software to hardware since laptop purchase"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "OOE",
+        "amount": 76633.81249999999,
+        "vendors": [
+          {
+            "name": "G Treasury SS, LLC",
+            "amount": 41250,
+            "contracts": [
+              {
+                "project": "Implement - Cash Matching Recon Solution",
+                "application": null,
+                "amount": 41250,
+                "notes": "New Risk for cash application matching - new project"
+              }
+            ]
+          },
+          {
+            "name": "Amortization/Multiple",
+            "amount": 19601.55249999999,
+            "contracts": [
+              {
+                "project": "N/A",
+                "application": "N/A",
+                "amount": 19601.55249999999,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Norske Finansielle Referanser AS",
+            "amount": 15208,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 15208,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "ASX Benchmarks PTY limited",
+            "amount": 573.8000000000002,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 573.8000000000002,
+                "notes": "in AUD"
+              }
+            ]
+          },
+          {
+            "name": "T&E - Refer to Concur",
+            "amount": 0.4599999999918509,
+            "contracts": [
+              {
+                "project": "Support - Internal Tech Workforce Activities",
+                "application": null,
+                "amount": 0.4599999999918509,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Infrastructure",
+        "amount": 571.8829300000034,
+        "vendors": [
+          {
+            "name": "j2 Cloud Services, Inc.",
+            "amount": 323.2300000000032,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 323.2300000000032,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Cogent Canada, Inc.",
+            "amount": 115.36750000000029,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 115.36750000000029,
+                "notes": "In CAD"
+              }
+            ]
+          },
+          {
+            "name": "SHI International Corp",
+            "amount": 73.75,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "Variable Monthly Usage",
+                "amount": 73.75,
+                "notes": "Variable Monthly Usage"
+              }
+            ]
+          },
+          {
+            "name": "Beanfield Technologies, Inc.",
+            "amount": 59.535429999999906,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 59.535429999999906,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "oppH": {
+    "total": 2006258.2758999995,
+    "cats": [
+      {
+        "cat": "FPC",
+        "amount": 1353166.6666666667,
+        "vendors": [
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": 884000,
+            "contracts": [
+              {
+                "project": "Implement - Build Pipes from CORE Systems to IVP",
+                "application": "Polaris/EDM/SecMast Core Implementation",
+                "amount": 384000,
+                "notes": "FPC- IVP Implementation Post Contract - Capitalizable-160K per month from Jan to June 2026 - Capitalizable"
+              },
+              {
+                "project": "Implement - Odyssey Reporting & Exception Mgmt",
+                "application": "New FPC BOW",
+                "amount": 300000,
+                "notes": "New 2026 BoW (Capitalizable)"
+              },
+              {
+                "project": "Implement - Reporting for Internal Audit",
+                "application": "New FPC BOW",
+                "amount": 200000,
+                "notes": "New 2026 BoW"
+              }
+            ]
+          },
+          {
+            "name": "MARKIT NORTH AMERICA, INC.",
+            "amount": 330000,
+            "contracts": [
+              {
+                "project": "Implement - WSO Own Instance (AM)",
+                "application": null,
+                "amount": 250000,
+                "notes": "New 2026 BoW"
+              },
+              {
+                "project": "Implement - WSO Balance Sheet Mig & Reporting",
+                "application": null,
+                "amount": 80000,
+                "notes": "New 2026 BoW (Capitalizable)"
+              }
+            ]
+          },
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": 139166.66666666666,
+            "contracts": [
+              {
+                "project": "Implement - QA CoE to Additional Platforms",
+                "application": null,
+                "amount": 41666.66666666666,
+                "notes": "New 2026 BoW"
+              },
+              {
+                "project": "Implement - L1/L2 CoE for Additional Platforms",
+                "application": null,
+                "amount": 97500,
+                "notes": "T&M- Implementing CoE for L1/L2 Platforms"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Software",
+        "amount": 332160.3042333337,
+        "vendors": [
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": 215775.62165000004,
+            "contracts": [
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Polaris/EDM/SecMast Core",
+                "amount": 215775.62165,
+                "notes": "IVP EDM, Polaris, Security Master Year 3 SaaS Fees/ Production License Fee + Annual Consulting Fee for IVP EDM, Polaris, Security Master-Prepaid"
+              },
+              {
+                "project": "Implement - Reporting for Internal Audit",
+                "application": "Polaris/EDM/SecMast Hosting",
+                "amount": 2.9103830456733704e-11,
+                "notes": "Polaris/EDM/SecMast- Prod. & UAT Hosting Fee-Prepaid till Jun2026, to be renewed post Jun2026"
+              },
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Polaris/EDM/SecMast Hosting",
+                "amount": 1.4551915228366852e-11,
+                "notes": "Polaris/EDM/SecMast- Disaster Recovery Hosting Fee-Prepaid till Apr2027, to be renewed post Apr2027"
+              }
+            ]
+          },
+          {
+            "name": "Alation Inc.",
+            "amount": 47911.5,
+            "contracts": [
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Alation",
+                "amount": 47911.5,
+                "notes": "Contract is Apr-Mar Budegetd 26 - 191K v/s Actual 172K"
+              }
+            ]
+          },
+          {
+            "name": "NewRocket, LLC",
+            "amount": 27895.964500000002,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "Strategic Portfolio Management (SPM) Pro",
+                "amount": 27895.964500000002,
+                "notes": "Strategic Portfolio Management (SPM) Pro, paid in Dec2025, to be renewed in Dec2026-Strategic Portfolio Management (SPM) Pro, paid in Dec2025, to be renewed in Dec2026"
+              }
+            ]
+          },
+          {
+            "name": "OneStream Software, LLC",
+            "amount": 14216.030000000086,
+            "contracts": [
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": null,
+                "amount": 14216.030000000086,
+                "notes": "Prepaid 2026"
+              }
+            ]
+          },
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": 6404.9107499999955,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "NCE M365 Jan - Dec Mthly Invoice",
+                "amount": 6404.9107499999955,
+                "notes": "NCE M365 E5"
+              }
+            ]
+          },
+          {
+            "name": "FinDox Inc.",
+            "amount": 6029.212500000023,
+            "contracts": [
+              {
+                "project": "Support - Asset Management Applications",
+                "application": "FinDox Core",
+                "amount": 6029.212500000023,
+                "notes": "Total contract - 342k IT cost 232k recharge to Liquid Credit 109k"
+              }
+            ]
+          },
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": 4802.460000000006,
+            "contracts": [
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": "UiPath",
+                "amount": 4802.460000000006,
+                "notes": "UiPath Sftwr-UiPath Sftwr"
+              }
+            ]
+          },
+          {
+            "name": "Monday.com Ltd",
+            "amount": 3630.750000000058,
+            "contracts": [
+              {
+                "project": "Support - Tech Enablement 2026",
+                "application": "Management Enterprise 600 Seats",
+                "amount": 3630.750000000058,
+                "notes": "Paid as Prepaid in 2025; to be renewed in 2026-Paid as Prepaid in 2025; to be renewed in 2026"
+              }
+            ]
+          },
+          {
+            "name": "RFPIO INC. (Responsive)",
+            "amount": 3470.896000000008,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": null,
+                "amount": 3470.896000000008,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Seismic Software Inc.",
+            "amount": 1329.5333333333256,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": null,
+                "amount": 1329.5333333333256,
+                "notes": "FPC TBD Dependent on Investor Reporting Integration into Seismic - Prepaid"
+              }
+            ]
+          },
+          {
+            "name": "HSO Enterprise Solutions LLC",
+            "amount": 600,
+            "contracts": [
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": null,
+                "amount": 600,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Smarsh Inc.",
+            "amount": 92.41000000000349,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": "Subscription",
+                "amount": 92.41000000000349,
+                "notes": "75000"
+              }
+            ]
+          },
+          {
+            "name": "Datadog, Inc.",
+            "amount": 0.665499999999156,
+            "contracts": [
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": null,
+                "amount": 0.415499999999156,
+                "notes": "Sftwr- Potential Risk to look for"
+              },
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": null,
+                "amount": 0.25,
+                "notes": "Sftwr- Mis-posting Prepaid"
+              }
+            ]
+          },
+          {
+            "name": "Workday, Inc.",
+            "amount": 0.34999999997671694,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": "Workday",
+                "amount": 0.34999999997671694,
+                "notes": "Misposting PREPAID in 2025; paid $419,687/- in Mar2025. Renewed as Prepaid in Mar 2026.-Added opportunity in Dec for extra support work as rec. my Melissa"
+              }
+            ]
+          },
+          {
+            "name": "Microsoft Corporation",
+            "amount": 8.731149137020111e-11,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "CRM Lic",
+                "amount": 5.820766091346741e-11,
+                "notes": "Renewed 6/1/25, anniversary date true-up-CRM (Prepaid)"
+              },
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "F&O Lic",
+                "amount": 2.9103830456733704e-11,
+                "notes": "Renewed 6/1/25, anniversary date true-up-F&O (Prepaid)"
+              }
+            ]
+          },
+          {
+            "name": "Cloud Software Group (formally Tibco)",
+            "amount": 2.9103830456733704e-11,
+            "contracts": [
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Spotfire",
+                "amount": 2.9103830456733704e-11,
+                "notes": "Paid as prepaid in 2025, to be renewed in Aug/Sep 2026"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Labor/ T&M",
+        "amount": 237437,
+        "vendors": [
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": 162288,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 86000,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 76288,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              }
+            ]
+          },
+          {
+            "name": "Andersen Tax Holdings",
+            "amount": 45561,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 11777,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 33784,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              }
+            ]
+          },
+          {
+            "name": "Intelligent Business Platforms LLC",
+            "amount": 24048,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": "T&M",
+                "amount": 24048,
+                "notes": "T&M - Intellibus"
+              }
+            ]
+          },
+          {
+            "name": "Cognizant Worldwide Limited",
+            "amount": 5540,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": "D365 CRM",
+                "amount": 5540,
+                "notes": "T&M"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "MS",
+        "amount": 43847.53,
+        "vendors": [
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": 21401.339999999997,
+            "contracts": [
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": "Polaris/EDM/SecMast Core l2",
+                "amount": 10196.339999999997,
+                "notes": "IVP L2 Tech MS"
+              },
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": "Data MS",
+                "amount": 11205,
+                "notes": "Data Managed Srvc"
+              }
+            ]
+          },
+          {
+            "name": "Virteva LLC",
+            "amount": 10000,
+            "contracts": [
+              {
+                "project": "Support - Enterprise Tech Helpdesk",
+                "application": null,
+                "amount": 10000,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Archetype Consulting, Inc.",
+            "amount": 7725,
+            "contracts": [
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": null,
+                "amount": 7725,
+                "notes": "check for contract copy"
+              }
+            ]
+          },
+          {
+            "name": "NewRocket, LLC",
+            "amount": 4330.440000000002,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements SNOW - Phase 2",
+                "application": "ServiceNow",
+                "amount": 4330.440000000002,
+                "notes": "Monthly SOW"
+              }
+            ]
+          },
+          {
+            "name": "BWise Internal Control Inc.",
+            "amount": 390.75,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": null,
+                "amount": 390.75,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Hardware",
+        "amount": 22480.78999999999,
+        "vendors": [
+          {
+            "name": "SHI International Corp",
+            "amount": 15282.789999999994,
+            "contracts": [
+              {
+                "project": "Support - Enterprise Tech Helpdesk",
+                "application": null,
+                "amount": 15282.789999999994,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": 7197.999999999996,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 7197.999999999996,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Infrastructure",
+        "amount": 14942.734999998927,
+        "vendors": [
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": 11984.579999999958,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 11984.579999999958,
+                "notes": "Network Managed Services (Network Operation Centre (NOC))"
+              }
+            ]
+          },
+          {
+            "name": "Cisco Systems, Inc.",
+            "amount": 1674,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 1674,
+                "notes": "Webex service  has been cancelled in Dec'25, confirmed by Danny"
+              }
+            ]
+          },
+          {
+            "name": "COGENT COMMUNICATIONS, INC",
+            "amount": 420.8700000000026,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 420.8700000000026,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "LoopUp",
+            "amount": 409.90000000000146,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 409.90000000000146,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "LEVEL 3 COMMUNICATIONS",
+            "amount": 302.1299999999974,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 302.1299999999974,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "SaferKid, Inc. (FirmScribe)",
+            "amount": 150,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 150,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "General Office Expense - Refer to Concur",
+            "amount": 0.5933333333337032,
+            "contracts": [
+              {
+                "project": "Support - Internal Tech Workforce Activities",
+                "application": null,
+                "amount": 0.5933333333337032,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Microsoft Corporation",
+            "amount": 0.3399999989196658,
+            "contracts": [
+              {
+                "project": "Support - Site Reliability Engineering for Tech",
+                "application": null,
+                "amount": 0.3399999989196658,
+                "notes": "3 YR $16MM Commitment;\nPotential Incremental spend for Project Evolution-MS Cloud"
+              }
+            ]
+          },
+          {
+            "name": "Verizon Wireless Services LLC",
+            "amount": 0.3216666667140089,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 0.3216666667140089,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "OOE",
+        "amount": 2223.2500000000055,
+        "vendors": [
+          {
+            "name": "Bloomberg Finance L.P.",
+            "amount": 1820.8999999999996,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Credit Apps",
+                "application": null,
+                "amount": 1820.8999999999996,
+                "notes": "Subscription"
+              }
+            ]
+          },
+          {
+            "name": "ICE Benchmark Administration Ltd",
+            "amount": 400,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": "Libor Historical (may be Tax Invoice)",
+                "amount": 400,
+                "notes": "For Libor Historical Data tax inovice"
+              }
+            ]
+          },
+          {
+            "name": "THOMSON REUTERS MARKETS LLC",
+            "amount": 2.3500000000058208,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 2.3500000000058208,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "netH": {
+    "total": 1502873.4462666651,
+    "cats": [
+      {
+        "cat": "Labor/ T&M",
+        "amount": 1761250.3599999999,
+        "vendors": [
+          {
+            "name": "Intelligent Business Platforms LLC",
+            "amount": 916752,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": "T&M",
+                "amount": -24048,
+                "notes": "T&M - Intellibus"
+              },
+              {
+                "project": "T&M",
+                "application": "T&M",
+                "amount": 940800,
+                "notes": "T&M- H2-2026 Risk"
+              }
+            ]
+          },
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": 807200,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": "Prj Mgmt T&M",
+                "amount": 279200,
+                "notes": "T&M IVP Mgmt (TOM)- Rahul & Vaibhav + 2"
+              },
+              {
+                "project": "T&M",
+                "application": "Prj Mgmt T&M",
+                "amount": 528000,
+                "notes": "T&M IVP Mgmt (TOM)- Rahul & Vaibhav + 2 for H2-2026 - Risk"
+              }
+            ]
+          },
+          {
+            "name": "Andersen Tax Holdings",
+            "amount": 95033,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": -11777,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 29498,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": -33784,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 2432,
+                "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 71440,
+                "notes": "Swati Yadav"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 37224,
+                "notes": "Danny's extra 1Rivet HC - Risk"
+              }
+            ]
+          },
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": -52194.640000000014,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 109043.35999999999,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": 1050,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": -86000,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              },
+              {
+                "project": "T&M",
+                "application": null,
+                "amount": -76288,
+                "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit"
+              }
+            ]
+          },
+          {
+            "name": "Cognizant Worldwide Limited",
+            "amount": -5540,
+            "contracts": [
+              {
+                "project": "T&M",
+                "application": "D365 CRM",
+                "amount": -5540,
+                "notes": "T&M"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "FPC",
+        "amount": -1353166.6666666667,
+        "vendors": [
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": -884000,
+            "contracts": [
+              {
+                "project": "Implement - Build Pipes from CORE Systems to IVP",
+                "application": "Polaris/EDM/SecMast Core Implementation",
+                "amount": -384000,
+                "notes": "FPC- IVP Implementation Post Contract - Capitalizable-160K per month from Jan to June 2026 - Capitalizable"
+              },
+              {
+                "project": "Implement - Odyssey Reporting & Exception Mgmt",
+                "application": "New FPC BOW",
+                "amount": -300000,
+                "notes": "New 2026 BoW (Capitalizable)"
+              },
+              {
+                "project": "Implement - Reporting for Internal Audit",
+                "application": "New FPC BOW",
+                "amount": -200000,
+                "notes": "New 2026 BoW"
+              }
+            ]
+          },
+          {
+            "name": "MARKIT NORTH AMERICA, INC.",
+            "amount": -330000,
+            "contracts": [
+              {
+                "project": "Implement - WSO Own Instance (AM)",
+                "application": null,
+                "amount": -250000,
+                "notes": "New 2026 BoW"
+              },
+              {
+                "project": "Implement - WSO Balance Sheet Mig & Reporting",
+                "application": null,
+                "amount": -80000,
+                "notes": "New 2026 BoW (Capitalizable)"
+              }
+            ]
+          },
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": -139166.66666666666,
+            "contracts": [
+              {
+                "project": "Implement - QA CoE to Additional Platforms",
+                "application": null,
+                "amount": -41666.66666666666,
+                "notes": "New 2026 BoW"
+              },
+              {
+                "project": "Implement - L1/L2 CoE for Additional Platforms",
+                "application": null,
+                "amount": -97500,
+                "notes": "T&M- Implementing CoE for L1/L2 Platforms"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Software",
+        "amount": 772438.9729333322,
+        "vendors": [
+          {
+            "name": "Finastra Technology, Inc",
+            "amount": 456079.3699999992,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": "LIQ - Loan IQ",
+                "amount": 456079.3699999992,
+                "notes": "Recurring License Fee/Maintenance for the period 1-Jan-2026 to 14-Jan-2026 and Subscription Fees for the period 15-Jan-2026 to 14-Jan-2027"
+              }
+            ]
+          },
+          {
+            "name": "MARKIT NORTH AMERICA, INC.",
+            "amount": 232487.75,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 232487.75,
+                "notes": "WSO Web Services - Subs/ WSO Web/AUM/SubVar- Potential Risk"
+              }
+            ]
+          },
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": -215775.62165,
+            "contracts": [
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Polaris/EDM/SecMast Core",
+                "amount": -215775.62165,
+                "notes": "IVP EDM, Polaris, Security Master Year 3 SaaS Fees/ Production License Fee + Annual Consulting Fee for IVP EDM, Polaris, Security Master-Prepaid"
+              }
+            ]
+          },
+          {
+            "name": "PactFi Inc.",
+            "amount": 132827.5,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Credit Apps",
+                "application": "PactFi Annual Platform Fee",
+                "amount": 132827.5,
+                "notes": "Year 1 of 3: 1/26/26 to 1/25/27 - Capitalizable"
+              }
+            ]
+          },
+          {
+            "name": "CME Group",
+            "amount": 92000,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": "LIQ",
+                "amount": 92000,
+                "notes": "This was not part of initial budget"
+              }
+            ]
+          },
+          {
+            "name": "Allvue Systems, LLC",
+            "amount": 86226.11999999965,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Credit Apps",
+                "application": "BMS",
+                "amount": 86226.11999999965,
+                "notes": "Prepaid 2026"
+              }
+            ]
+          },
+          {
+            "name": "NewRocket, LLC",
+            "amount": 72735.98966666666,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "ServiceNow Agile Team + Various",
+                "amount": 100631.95416666666,
+                "notes": "Prepaid in 2025; to be renewed in Dec 2026-Prepaid in 2025; to be renewed in Dec 2026"
+              },
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "Strategic Portfolio Management (SPM) Pro",
+                "amount": -27895.964500000002,
+                "notes": "Strategic Portfolio Management (SPM) Pro, paid in Dec2025, to be renewed in Dec2026-Strategic Portfolio Management (SPM) Pro, paid in Dec2025, to be renewed in Dec2026"
+              }
+            ]
+          },
+          {
+            "name": "Alation Inc.",
+            "amount": -47911.5,
+            "contracts": [
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Alation",
+                "amount": -47911.5,
+                "notes": "Contract is Apr-Mar Budegetd 26 - 191K v/s Actual 172K"
+              }
+            ]
+          },
+          {
+            "name": "OneStream Software, LLC",
+            "amount": -14216.030000000086,
+            "contracts": [
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": null,
+                "amount": -14216.030000000086,
+                "notes": "Prepaid 2026"
+              }
+            ]
+          },
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": -6404.9107499999955,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "NCE M365 Jan - Dec Mthly Invoice",
+                "amount": -6404.9107499999955,
+                "notes": "NCE M365 E5"
+              }
+            ]
+          },
+          {
+            "name": "FinDox Inc.",
+            "amount": -6029.212500000023,
+            "contracts": [
+              {
+                "project": "Support - Asset Management Applications",
+                "application": "FinDox Core",
+                "amount": -6029.212500000023,
+                "notes": "Total contract - 342k IT cost 232k recharge to Liquid Credit 109k"
+              }
+            ]
+          },
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": -4802.460000000006,
+            "contracts": [
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": "UiPath",
+                "amount": -4802.460000000006,
+                "notes": "UiPath Sftwr-UiPath Sftwr"
+              }
+            ]
+          },
+          {
+            "name": "Monday.com Ltd",
+            "amount": -3630.750000000058,
+            "contracts": [
+              {
+                "project": "Support - Tech Enablement 2026",
+                "application": "Management Enterprise 600 Seats",
+                "amount": -3630.750000000058,
+                "notes": "Paid as Prepaid in 2025; to be renewed in 2026-Paid as Prepaid in 2025; to be renewed in 2026"
+              }
+            ]
+          },
+          {
+            "name": "RFPIO INC. (Responsive)",
+            "amount": -3470.896000000008,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": null,
+                "amount": -3470.896000000008,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "SALESFORCE COM INC",
+            "amount": 2252.8499999999985,
+            "contracts": [
+              {
+                "project": "Support - Data Analytics Office",
+                "application": "Tableau Creator (5) + Viewer (40) + Explorer (10)",
+                "amount": 2252.8499999999985,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Broadridge Output  Solutions",
+            "amount": 2000.3075000001118,
+            "contracts": [
+              {
+                "project": "Support - Asset Management Applications",
+                "application": "Centry CLO",
+                "amount": 2000.3075000001118,
+                "notes": "Quarterly Prepaid"
+              }
+            ]
+          },
+          {
+            "name": "Seismic Software Inc.",
+            "amount": -1329.5333333333256,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": null,
+                "amount": -1329.5333333333256,
+                "notes": "FPC TBD Dependent on Investor Reporting Integration into Seismic - Prepaid"
+              }
+            ]
+          },
+          {
+            "name": "HSO Enterprise Solutions LLC",
+            "amount": -600,
+            "contracts": [
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": null,
+                "amount": -600,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "MS",
+        "amount": 203152.47,
+        "vendors": [
+          {
+            "name": "Coforge DPA NA Inc.",
+            "amount": 247000,
+            "contracts": [
+              {
+                "project": "Support - QA CoE Management for Tech Horizontals",
+                "application": null,
+                "amount": 247000,
+                "notes": "QA SOW FPC - [KA - Feb23] - Updated forecast from Mar to Dec based on the new contract that superseeded the original one"
+              }
+            ]
+          },
+          {
+            "name": "Indus Valley Partners Corporation",
+            "amount": -21401.339999999997,
+            "contracts": [
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": "Polaris/EDM/SecMast Core l2",
+                "amount": -10196.339999999997,
+                "notes": "IVP L2 Tech MS"
+              },
+              {
+                "project": "Support - L2 CoE Management for Tech Horizontals",
+                "application": "Data MS",
+                "amount": -11205,
+                "notes": "Data Managed Srvc"
+              }
+            ]
+          },
+          {
+            "name": "Virteva LLC",
+            "amount": -10000,
+            "contracts": [
+              {
+                "project": "Support - Enterprise Tech Helpdesk",
+                "application": null,
+                "amount": -10000,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Archetype Consulting, Inc.",
+            "amount": -7725,
+            "contracts": [
+              {
+                "project": "Support - Prod support for Finance Applications",
+                "application": null,
+                "amount": -7725,
+                "notes": "check for contract copy"
+              }
+            ]
+          },
+          {
+            "name": "NewRocket, LLC",
+            "amount": -4330.440000000002,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements SNOW - Phase 2",
+                "application": "ServiceNow",
+                "amount": -4330.440000000002,
+                "notes": "Monthly SOW"
+              }
+            ]
+          },
+          {
+            "name": "BWise Internal Control Inc.",
+            "amount": -390.75,
+            "contracts": [
+              {
+                "project": "Implement - Minor Enhancements for Enterprise Apps",
+                "application": null,
+                "amount": -390.75,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "OOE",
+        "amount": 74412.4525,
+        "vendors": [
+          {
+            "name": "G Treasury SS, LLC",
+            "amount": 41250,
+            "contracts": [
+              {
+                "project": "Implement - Cash Matching Recon Solution",
+                "application": null,
+                "amount": 41250,
+                "notes": "New Risk for cash application matching - new project"
+              }
+            ]
+          },
+          {
+            "name": "Amortization/Multiple",
+            "amount": 19601.55249999999,
+            "contracts": [
+              {
+                "project": "N/A",
+                "application": "N/A",
+                "amount": 19601.55249999999,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Norske Finansielle Referanser AS",
+            "amount": 15208,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 15208,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Bloomberg Finance L.P.",
+            "amount": -1820.8999999999996,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Credit Apps",
+                "application": null,
+                "amount": -1820.8999999999996,
+                "notes": "Subscription"
+              }
+            ]
+          },
+          {
+            "name": "ASX Benchmarks PTY limited",
+            "amount": 573.8000000000002,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": null,
+                "amount": 573.8000000000002,
+                "notes": "in AUD"
+              }
+            ]
+          },
+          {
+            "name": "ICE Benchmark Administration Ltd",
+            "amount": -400,
+            "contracts": [
+              {
+                "project": "Support - Prod Support for Ops Apps",
+                "application": "Libor Historical (may be Tax Invoice)",
+                "amount": -400,
+                "notes": "For Libor Historical Data tax inovice"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Hardware",
+        "amount": 59288.740000000005,
+        "vendors": [
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": 67802,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": -7197.999999999996,
+                "notes": ""
+              },
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 75000,
+                "notes": "2026 Laptops - Danny- Risk"
+              }
+            ]
+          },
+          {
+            "name": "SHI International Corp",
+            "amount": -8513.259999999993,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": "Papercut SaaS Maintenance",
+                "amount": 6769.530000000001,
+                "notes": "Not part of original budget; risk added, category updated from software to hardware since laptop purchase"
+              },
+              {
+                "project": "Support - Enterprise Tech Helpdesk",
+                "application": null,
+                "amount": -15282.789999999994,
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "cat": "Infrastructure",
+        "amount": -14502.882499999956,
+        "vendors": [
+          {
+            "name": "CDW DIRECT LLC",
+            "amount": -11984.579999999958,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": -11984.579999999958,
+                "notes": "Network Managed Services (Network Operation Centre (NOC))"
+              }
+            ]
+          },
+          {
+            "name": "Cisco Systems, Inc.",
+            "amount": -1674,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": -1674,
+                "notes": "Webex service  has been cancelled in Dec'25, confirmed by Danny"
+              }
+            ]
+          },
+          {
+            "name": "COGENT COMMUNICATIONS, INC",
+            "amount": -420.8700000000026,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": -420.8700000000026,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "LoopUp",
+            "amount": -409.90000000000146,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": -409.90000000000146,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "j2 Cloud Services, Inc.",
+            "amount": 323.2300000000032,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 323.2300000000032,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "LEVEL 3 COMMUNICATIONS",
+            "amount": -302.1299999999974,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": -302.1299999999974,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "SaferKid, Inc. (FirmScribe)",
+            "amount": -150,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": -150,
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "name": "Cogent Canada, Inc.",
+            "amount": 115.36750000000029,
+            "contracts": [
+              {
+                "project": "Support - Infrastructure for Tech",
+                "application": null,
+                "amount": 115.36750000000029,
+                "notes": "In CAD"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "summary": {
+    "budget": 44788397.956149995,
+    "actual": 19827793.037130002,
+    "forecast": 46291396.96301333,
+    "remaining": 35295503.19925,
+    "risk": 3509257.282763332,
+    "opp": -2006258.2758999988,
+    "net": 1502999.006863333,
+    "rowCount": 144,
+    "excludedCount": 1
+  }
+}
