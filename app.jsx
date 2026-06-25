@@ -1,6 +1,11 @@
 // Main app — executive overview only
 // Tabs, filter bar, and view controls removed.
 
+// Bumped every time the standalone is re-bundled with a new workbook.
+// Boot uses this to decide whether localStorage (a user upload) is newer
+// than the embedded Excel. Stale localStorage without an uploadTs loses.
+const BUNDLE_DATE = '2026-06-25T12:00:00Z';
+
 const { useState: useStateA, useEffect, useMemo: useMemoA } = React;
 
 const TWEAK_DEFAULTS = {
@@ -22,10 +27,11 @@ function App({ data: initialData }) {
   const [activeTab,  setActiveTab]  = useStateA('overview');
   const [uploadOpen, setUploadOpen] = useStateA(false);
   const [uploadKey,  setUploadKey]  = useStateA(0);
-  const [sourceInfo, setSourceInfo] = useStateA(null);
+  const [sourceInfo, setSourceInfo] = useStateA(() => {
+    try { const s = localStorage.getItem('techfin-source-v1'); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
   const [asOfDate, setAsOfDate] = useStateA(() => {
-    const now = new Date();
-    return now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    try { return localStorage.getItem('techfin-asof-v1') || 'Jun 22, 2026'; } catch { return 'Jun 22, 2026'; }
   });
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -41,21 +47,29 @@ function App({ data: initialData }) {
     document.body.className = `mood-${t.mood} density-${t.density}`;
   }, [t.mood, t.density]);
 
-  // ── Handle workbook upload — update current view only, do not persist stale browser data ──
+  // ── Handle workbook upload — persist, update state, re-mount overview ──
   function handleUpload(filename, parsedData) {
-    const now = new Date();
-    const info = {
-      filename,
-      timestamp: now.toLocaleString('en-US', {
-        month:'short', day:'numeric', year:'numeric',
-        hour:'numeric', minute:'2-digit', hour12:true,
-      }),
-      rowCount:    parsedData.lineItems ? parsedData.lineItems.length : 0,
-      vendorCount: parsedData.vendors   ? parsedData.vendors.length  : 0,
-    };
-    const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-    setSourceInfo(info);
-    setAsOfDate(asof);
+    try {
+      localStorage.setItem('techfin-data-v1', JSON.stringify(parsedData));
+      const now = new Date();
+      const info = {
+        filename,
+        timestamp: now.toLocaleString('en-US', {
+          month:'short', day:'numeric', year:'numeric',
+          hour:'numeric', minute:'2-digit', hour12:true,
+        }),
+        rowCount:    parsedData.lineItems ? parsedData.lineItems.length : 0,
+        vendorCount: parsedData.vendors   ? parsedData.vendors.length  : 0,
+      };
+      localStorage.setItem('techfin-source-v1', JSON.stringify(info));
+      localStorage.setItem('techfin-upload-ts-v1', new Date().toISOString());
+      const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+      localStorage.setItem('techfin-asof-v1', asof);
+      setSourceInfo(info);
+      setAsOfDate(asof);
+    } catch(e) {
+      console.warn('[upload] localStorage write failed:', e.message);
+    }
     parsedData._bootSource = 'uploaded';
     setData(parsedData);
     setUploadKey(k => k + 1); // re-mount OverviewTab to reset its local filters
@@ -204,75 +218,54 @@ function App({ data: initialData }) {
   );
 }
 
-// ── Boot: latest GitHub workbook → JSON fallback ────────────────────────
+// ── Boot: localStorage → uploaded Excel → JSON fallback ─────────────────
 (async function boot() {
   try {
     let data;
 
-    // Clear old per-browser uploads so every visitor sees the latest deployed workbook.
+    // ── 1. Restore from localStorage only if the user uploaded AFTER this bundle was created.
+    //    This ensures a re-bundle with new data always wins over a stale prior session.
     try {
-      localStorage.removeItem('techfin-data-v1');
-      localStorage.removeItem('techfin-source-v1');
-      localStorage.removeItem('techfin-asof-v1');
-    } catch(e) {
-      console.warn('[boot] localStorage clear failed:', e.message);
-    }
-
-    // Always load the latest workbook from the GitHub repository, not only
-    // from GitHub Pages. Pages/CDN/browser layers can cache a same-name XLSX
-    // even after Power Automate commits a replacement. The GitHub Contents API
-    // gives us the current file SHA and a fresh download_url for the committed
-    // uploads/new_workbook.xlsx. If that fails, fall back to the Pages path.
-    try {
-      const repoApiUrl = 'https://api.github.com/repos/ari-gurovich-antares/tech_financials_dashboard/contents/uploads/new_workbook.xlsx?ref=main';
-      const metaResp = await fetch(repoApiUrl + '&v=' + Date.now(), {
-        cache: 'no-store',
-        headers: {
-          'Accept': 'application/vnd.github+json'
-        }
-      });
-
-      if (metaResp.ok) {
-        const meta = await metaResp.json();
-        const dl = meta.download_url;
-        if (dl) {
-          const dlSep = dl.includes('?') ? '&' : '?';
-          const fileResp = await fetch(dl + dlSep + 'sha=' + encodeURIComponent(meta.sha || Date.now()), { cache: 'no-store' });
-          if (fileResp.ok) {
-            const buf = await fileResp.arrayBuffer();
-            data = parseTechFinancialsXlsxFromArrayBuffer(buf);
-            data._bootSource = 'github-api-excel';
-            data._workbookSha = meta.sha || null;
+      const uploadTs = localStorage.getItem('techfin-upload-ts-v1');
+      const uploadIsNewer = uploadTs && new Date(uploadTs) > new Date(BUNDLE_DATE);
+      if (uploadIsNewer) {
+        const saved = localStorage.getItem('techfin-data-v1');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && Array.isArray(parsed.lineItems) && parsed.lineItems.length > 0) {
+            data = parsed;
+            data._bootSource = 'uploaded';
+            console.log('[boot] Restored from localStorage (upload newer than bundle):', parsed.lineItems.length, 'rows');
           }
         }
-      } else {
-        console.warn('[boot] GitHub API workbook metadata failed:', metaResp.status, metaResp.statusText);
+      } else if (uploadTs) {
+        console.log('[boot] localStorage upload older than bundle — using embedded workbook instead');
       }
     } catch(e) {
-      console.warn('[boot] GitHub API workbook load failed, trying Pages workbook:', e.message);
+      console.warn('[boot] localStorage restore failed:', e.message);
     }
 
-    // Fall back to GitHub Pages workbook with cache busting.
+    // ── 2. Try embedded Excel file
     if (!data) {
       try {
-        const baseExcelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
-        const sep = baseExcelUrl.includes('?') ? '&' : '?';
-        const resp = await fetch(baseExcelUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
+        const excelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
+        const excelSep = excelUrl.includes('?') ? '&' : '?';
+        const resp = await fetch(excelUrl + excelSep + 'v=' + Date.now(), { cache: 'no-store' });
         if (resp.ok) {
           const buf = await resp.arrayBuffer();
           data = parseTechFinancialsXlsxFromArrayBuffer(buf);
-          data._bootSource = 'pages-excel';
+          data._bootSource = 'excel';
         }
       } catch(e) {
-        console.warn('[boot] Pages Excel load failed, using JSON fallback:', e.message);
+        console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
       }
     }
 
-    // Fall back to financials.json if the workbook cannot be loaded.
+    // ── 3. Fall back to financials.json
     if (!data) {
-      const baseJsonUrl = (window.__resources && window.__resources.financialsJson) || 'data/financials.json';
-      const sep = baseJsonUrl.includes('?') ? '&' : '?';
-      const resp = await fetch(baseJsonUrl + sep + 'v=' + Date.now(), { cache: 'no-store' });
+      const jsonUrl = (window.__resources && window.__resources.financialsJson) || 'data/financials.json';
+      const jsonSep = jsonUrl.includes('?') ? '&' : '?';
+      const resp = await fetch(jsonUrl + jsonSep + 'v=' + Date.now(), { cache: 'no-store' });
       data = await resp.json();
       data._bootSource = 'json';
     }

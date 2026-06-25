@@ -528,25 +528,18 @@ function OverviewTab({ data }) {
 
       {/* ══ ROW 1 — 4 PRIMARY KPIs ══════════════════════════════════════ */}
       <style>{`
-        .kpi-flip { perspective: 900px; }
-        .kpi-flip-inner {
-          position: relative; width: 100%; height: 100%;
-          transition: transform 0.52s cubic-bezier(0.4, 0.2, 0.2, 1);
-          transform-style: preserve-3d;
-        }
-        .kpi-flip:hover .kpi-flip-inner { transform: rotateY(180deg); }
+        .kpi-flip { position: relative; }
+        .kpi-flip-inner { position: relative; width: 100%; height: 100%; }
         .kpi-flip-front, .kpi-flip-back {
           position: absolute; inset: 0;
-          backface-visibility: hidden;
-          -webkit-backface-visibility: hidden;
           display: flex; flex-direction: column;
           align-items: center; justify-content: center;
           padding: 28px; text-align: center;
+          transition: opacity 0.3s ease;
         }
-        .kpi-flip-back {
-          transform: rotateY(180deg);
-          background: #333C66;
-        }
+        .kpi-flip-back { background: #333C66; opacity: 0; }
+        .kpi-flip:hover .kpi-flip-front { opacity: 0; }
+        .kpi-flip:hover .kpi-flip-back { opacity: 1; }
       `}</style>
       <div style={{ ...CARD, ...MB20, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', overflow: 'hidden' }}>
         {[

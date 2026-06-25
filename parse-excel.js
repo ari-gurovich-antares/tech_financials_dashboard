@@ -350,7 +350,33 @@
         };
 
       } else {
-      console.log('[parse] Cap exclusion:', capRowLog.length, 'row(s) excluded, exclBudget=', Math.round(exclBudget/1000) + 'K, adjustment needed=', needsAdj);
+        console.log('[parse] Cap exclusion:', capRowLog.length, 'row(s) excluded, exclBudget=', Math.round(exclBudget/1000) + 'K, adjustment needed=', needsAdj);
+      }
+
+      // ── POST-ADJUSTMENT VALIDATION ───────────────────────────────────
+      // If the adjusted workbookSubtotal still diverges from lineItems by
+      // more than $1 000 (e.g. cap rows have negative budgets that over-
+      // correct when subtracted, or the SUBTOTAL range was mis-detected),
+      // fall back to the lineItems aggregation as the authoritative KPI
+      // source so that KPI cards always match the detail/category views.
+      let _lr = 0, _lo = 0, _ln = 0;
+      for (const li of lineItems) { _lr += li.risk||0; _lo += li.opp||0; _ln += li.net||0; }
+      const _postBudDiff  = Math.abs(workbookSubtotal.budget   - _lb);
+      const _postFcDiff   = Math.abs(workbookSubtotal.forecast - _lf);
+      if (_postBudDiff > 1000 || _postFcDiff > 1000) {
+        console.warn('[parse] Subtotal still diverges after Cap adj (budgetΔ=' +
+          Math.round(_postBudDiff/1000) + 'K, forecastΔ=' +
+          Math.round(_postFcDiff/1000) + 'K); falling back to lineItems aggregation for KPI cards');
+        workbookSubtotal = {
+          budget:    _lb,
+          forecast:  _lf,
+          actual:    _la,
+          remaining: _lf - _la,
+          risk:      _lr,
+          opp:       _lo,
+          net:       _ln,
+          absOpp:    Math.abs(_lo),
+        };
       }
     }
 
@@ -359,22 +385,6 @@
     }
 
     const _result = buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd);
-
-    // Read-only SharePoint/backup copies can contain stale cached formula results.
-    // SheetJS reads cached formula values but does not recalculate formulas, so do
-    // not use the SUBTOTAL row's cached values for KPI cards. Keep the SUBTOTAL
-    // formula range for row scoping, but derive headline totals from parsed rows.
-    _result.workbookSubtotal = {
-      budget: _result.summary.budget,
-      actual: _result.summary.actual,
-      forecast: _result.summary.forecast,
-      remaining: _result.summary.remaining,
-      risk: _result.summary.risk,
-      opp: _result.summary.opp,
-      net: _result.summary.net,
-      absOpp: Math.abs(_result.summary.opp),
-    };
-
     const _s = _result.summary;
     const _ws = _result.workbookSubtotal;
     if (_ws) {
