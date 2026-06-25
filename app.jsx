@@ -164,12 +164,8 @@ function App({ data: initialData }) {
           Upload Workbook
         </button>
         <div style={{ display:'flex', gap:20, alignItems:'center' }}>
-          <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
-            <span className="label">as of date</span>
-            <span className="val">{asOfDate}</span>
-          </div>
           {sourceInfo && (
-            <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3, borderLeft:'1px solid rgba(255,255,255,0.18)', paddingLeft:20 }}>
+            <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
               <span className="label">last updated</span>
               <span className="val">{_fmtTs(sourceInfo.timestamp)}</span>
             </div>
