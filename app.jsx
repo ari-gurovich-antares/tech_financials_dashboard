@@ -20,6 +20,17 @@ function _fmtTs(ts) {
   return i < 0 ? ts : ts.slice(0, i) + ' · ' + ts.slice(i + 2);
 }
 
+function _fmtAsOf(d = new Date()) {
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+
+function _fmtSourceTs(d = new Date()) {
+  return d.toLocaleString('en-US', {
+    month:'short', day:'numeric', year:'numeric',
+    hour:'numeric', minute:'2-digit', hour12:true,
+  });
+}
+
 function App({ data: initialData }) {
   const [filterState, setFilterState] = useStateA({ categories:[], vendors:[], domains:[], domainOwners:[], contractTypes:[], riskOppStatus:[] });
   const [filterPanelOpen, setFilterPanelOpen] = useStateA(false);
@@ -28,10 +39,12 @@ function App({ data: initialData }) {
   const [uploadOpen, setUploadOpen] = useStateA(false);
   const [uploadKey,  setUploadKey]  = useStateA(0);
   const [sourceInfo, setSourceInfo] = useStateA(() => {
+    if (initialData && initialData._sourceInfo) return initialData._sourceInfo;
     try { const s = localStorage.getItem('techfin-source-v1'); return s ? JSON.parse(s) : null; } catch { return null; }
   });
   const [asOfDate, setAsOfDate] = useStateA(() => {
-    try { return localStorage.getItem('techfin-asof-v1') || 'Jun 22, 2026'; } catch { return 'Jun 22, 2026'; }
+    if (initialData && initialData._asOfDate) return initialData._asOfDate;
+    return _fmtAsOf();
   });
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -54,16 +67,13 @@ function App({ data: initialData }) {
       const now = new Date();
       const info = {
         filename,
-        timestamp: now.toLocaleString('en-US', {
-          month:'short', day:'numeric', year:'numeric',
-          hour:'numeric', minute:'2-digit', hour12:true,
-        }),
+        timestamp: _fmtSourceTs(now),
         rowCount:    parsedData.lineItems ? parsedData.lineItems.length : 0,
         vendorCount: parsedData.vendors   ? parsedData.vendors.length  : 0,
       };
       localStorage.setItem('techfin-source-v1', JSON.stringify(info));
       localStorage.setItem('techfin-upload-ts-v1', new Date().toISOString());
-      const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+      const asof = _fmtAsOf(now);
       localStorage.setItem('techfin-asof-v1', asof);
       setSourceInfo(info);
       setAsOfDate(asof);
@@ -235,6 +245,11 @@ function App({ data: initialData }) {
           if (parsed && Array.isArray(parsed.lineItems) && parsed.lineItems.length > 0) {
             data = parsed;
             data._bootSource = 'uploaded';
+            const infoRaw = localStorage.getItem('techfin-source-v1');
+            const info = infoRaw ? JSON.parse(infoRaw) : null;
+            const uploadDate = uploadTs ? new Date(uploadTs) : new Date();
+            data._asOfDate = _fmtAsOf(uploadDate);
+            if (info) data._sourceInfo = info;
             console.log('[boot] Restored from localStorage (upload newer than bundle):', parsed.lineItems.length, 'rows');
           }
         }
@@ -255,6 +270,15 @@ function App({ data: initialData }) {
           const buf = await resp.arrayBuffer();
           data = parseTechFinancialsXlsxFromArrayBuffer(buf);
           data._bootSource = 'excel';
+          const loadedAt = new Date();
+          data._asOfDate = _fmtAsOf(loadedAt);
+          data._sourceInfo = {
+            filename: 'uploads/new_workbook.xlsx',
+            timestamp: _fmtSourceTs(loadedAt),
+            rowCount: data.lineItems ? data.lineItems.length : 0,
+            vendorCount: data.vendors ? data.vendors.length : 0,
+            source: 'website workbook'
+          };
         }
       } catch(e) {
         console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
@@ -268,6 +292,15 @@ function App({ data: initialData }) {
       const resp = await fetch(jsonUrl + jsonSep + 'v=' + Date.now(), { cache: 'no-store' });
       data = await resp.json();
       data._bootSource = 'json';
+      const loadedAt = new Date();
+      data._asOfDate = _fmtAsOf(loadedAt);
+      data._sourceInfo = {
+        filename: 'data/financials.json',
+        timestamp: _fmtSourceTs(loadedAt),
+        rowCount: data.lineItems ? data.lineItems.length : 0,
+        vendorCount: data.vendors ? data.vendors.length : 0,
+        source: 'json fallback'
+      };
     }
     const root = ReactDOM.createRoot(document.getElementById('app'));
     root.render(<App data={data} />);
