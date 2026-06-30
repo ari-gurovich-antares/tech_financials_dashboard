@@ -4,7 +4,7 @@
 // Bumped every time the standalone is re-bundled with a new workbook.
 // Boot uses this to decide whether localStorage (a user upload) is newer
 // than the embedded Excel. Stale localStorage without an uploadTs loses.
-const BUNDLE_DATE = '2026-06-25T12:00:00Z';
+const BUNDLE_DATE = '2026-06-30T20:00:00Z'; // bumped: xlsx-first boot, cache-busting, localStorage demoted to fallback
 
 const { useState: useStateA, useEffect, useMemo: useMemoA } = React;
 
@@ -20,17 +20,6 @@ function _fmtTs(ts) {
   return i < 0 ? ts : ts.slice(0, i) + ' · ' + ts.slice(i + 2);
 }
 
-function _fmtAsOf(d = new Date()) {
-  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-}
-
-function _fmtSourceTs(d = new Date()) {
-  return d.toLocaleString('en-US', {
-    month:'short', day:'numeric', year:'numeric',
-    hour:'numeric', minute:'2-digit', hour12:true,
-  });
-}
-
 function App({ data: initialData }) {
   const [filterState, setFilterState] = useStateA({ categories:[], vendors:[], domains:[], domainOwners:[], contractTypes:[], riskOppStatus:[] });
   const [filterPanelOpen, setFilterPanelOpen] = useStateA(false);
@@ -39,12 +28,10 @@ function App({ data: initialData }) {
   const [uploadOpen, setUploadOpen] = useStateA(false);
   const [uploadKey,  setUploadKey]  = useStateA(0);
   const [sourceInfo, setSourceInfo] = useStateA(() => {
+    // Prefer the source information from the workbook loaded at boot.
+    // Do not let stale localStorage timestamps override the current GitHub workbook.
     if (initialData && initialData._sourceInfo) return initialData._sourceInfo;
     try { const s = localStorage.getItem('techfin-source-v1'); return s ? JSON.parse(s) : null; } catch { return null; }
-  });
-  const [asOfDate, setAsOfDate] = useStateA(() => {
-    if (initialData && initialData._asOfDate) return initialData._asOfDate;
-    return _fmtAsOf();
   });
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -67,16 +54,18 @@ function App({ data: initialData }) {
       const now = new Date();
       const info = {
         filename,
-        timestamp: _fmtSourceTs(now),
+        timestamp: now.toLocaleString('en-US', {
+          month:'short', day:'numeric', year:'numeric',
+          hour:'numeric', minute:'2-digit', hour12:true,
+        }),
         rowCount:    parsedData.lineItems ? parsedData.lineItems.length : 0,
         vendorCount: parsedData.vendors   ? parsedData.vendors.length  : 0,
       };
       localStorage.setItem('techfin-source-v1', JSON.stringify(info));
       localStorage.setItem('techfin-upload-ts-v1', new Date().toISOString());
-      const asof = _fmtAsOf(now);
+      const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
       localStorage.setItem('techfin-asof-v1', asof);
       setSourceInfo(info);
-      setAsOfDate(asof);
     } catch(e) {
       console.warn('[upload] localStorage write failed:', e.message);
     }
@@ -129,7 +118,13 @@ function App({ data: initialData }) {
 
 
 
-  const ctx = { ...data, ...filtered, filters, filterState, setFilterState };
+  // Preserve backPocket from the parsed workbook summary.
+  // filtered.summary (from aggregate()) overwrites data.summary but has no backPocket field.
+  const _parsedBackPocket = (data.summary && typeof data.summary.backPocket === 'number')
+    ? data.summary.backPocket : 0;
+  const ctx = { ...data, ...filtered,
+    summary: { ...filtered.summary, backPocket: _parsedBackPocket },
+    filters, filterState, setFilterState };
 
 
 
@@ -164,12 +159,10 @@ function App({ data: initialData }) {
           Upload Workbook
         </button>
         <div style={{ display:'flex', gap:20, alignItems:'center' }}>
-          {sourceInfo && (
-            <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
-              <span className="label">last updated</span>
-              <span className="val">{_fmtTs(sourceInfo.timestamp)}</span>
-            </div>
-          )}
+          <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
+            <span className="label">last updated</span>
+            <span className="val">{sourceInfo ? _fmtTs(sourceInfo.timestamp) : _fmtTs(new Date(BUNDLE_DATE).toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true }))}</span>
+          </div>
         </div>
       </div>
 
@@ -181,6 +174,10 @@ function App({ data: initialData }) {
           onClick={() => setActiveTab('overview')}
         >Overview</button>
         <button
+          className={`tab${activeTab === 'vendors' ? ' active' : ''}`}
+          onClick={() => setActiveTab('vendors')}
+        >Vendors</button>
+        <button
           className={`tab${activeTab === 'guide' ? ' active' : ''}`}
           onClick={() => setActiveTab('guide')}
         >User Guide</button>
@@ -189,11 +186,15 @@ function App({ data: initialData }) {
       {/* ── TAB CONTENT ──────────────────────────────────────────────── */}
       {activeTab === 'overview' ? (
         <div className="content"><OverviewTab key={uploadKey} data={ctx} /></div>
-      ) : (
+      ) : activeTab === 'guide' ? (
         <UserGuideTab />
+      ) : null}
+
+
+
+      {activeTab === 'vendors' && (
+        <div className="content"><VendorsTab data={ctx} view={filters.view} /></div>
       )}
-
-
 
       {uploadOpen && (
         <UploadModal
@@ -224,79 +225,63 @@ function App({ data: initialData }) {
   );
 }
 
-// ── Boot: localStorage → uploaded Excel → JSON fallback ─────────────────
+// ── Boot: xlsx (always primary) → localStorage fallback → JSON last-resort ──────
 (async function boot() {
   try {
     let data;
 
-    // ── 1. Restore from localStorage only if the user uploaded AFTER this bundle was created.
-    //    This ensures a re-bundle with new data always wins over a stale prior session.
+    // ── 1. Always fetch uploads/new_workbook.xlsx first.
+    //    Cache-busting (?v=timestamp) ensures the browser never serves a stale
+    //    copy after Power Automate replaces the file on GitHub Pages.
     try {
-      const uploadTs = localStorage.getItem('techfin-upload-ts-v1');
-      const uploadIsNewer = uploadTs && new Date(uploadTs) > new Date(BUNDLE_DATE);
-      if (uploadIsNewer) {
+      const xlsxUrl = (window.__resources && window.__resources.excelFile)
+        || ('uploads/new_workbook.xlsx?v=' + Date.now());
+      const resp = await fetch(xlsxUrl, { cache: 'no-store' });
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer();
+        data = parseTechFinancialsXlsxFromArrayBuffer(buf);
+        data._bootSource = 'excel';
+        data._sourceInfo = {
+          filename: 'uploads/new_workbook.xlsx',
+          timestamp: new Date().toLocaleString('en-US', {
+            month:'short', day:'numeric', year:'numeric',
+            hour:'numeric', minute:'2-digit', hour12:true,
+          }),
+          rowCount: data.lineItems ? data.lineItems.length : 0,
+          vendorCount: data.vendors ? data.vendors.length : 0,
+        };
+        console.log('[boot] Loaded uploads/new_workbook.xlsx (cache-busted, fresh fetch)');
+      }
+    } catch(e) {
+      console.warn('[boot] Excel auto-load failed:', e.message);
+    }
+
+    // ── 2. Fallback: restore a manually-uploaded workbook from localStorage.
+    //    Only reached if the xlsx fetch above failed (network error, file missing, etc.).
+    //    This preserves the Manual Upload Workbook experience when offline or during
+    //    local development without a server.
+    if (!data) {
+      try {
         const saved = localStorage.getItem('techfin-data-v1');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && Array.isArray(parsed.lineItems) && parsed.lineItems.length > 0) {
             data = parsed;
             data._bootSource = 'uploaded';
-            const infoRaw = localStorage.getItem('techfin-source-v1');
-            const info = infoRaw ? JSON.parse(infoRaw) : null;
-            const uploadDate = uploadTs ? new Date(uploadTs) : new Date();
-            data._asOfDate = _fmtAsOf(uploadDate);
-            if (info) data._sourceInfo = info;
-            console.log('[boot] Restored from localStorage (upload newer than bundle):', parsed.lineItems.length, 'rows');
+            console.log('[boot] xlsx unavailable — restored manual upload from localStorage:', parsed.lineItems.length, 'rows');
           }
         }
-      } else if (uploadTs) {
-        console.log('[boot] localStorage upload older than bundle — using embedded workbook instead');
-      }
-    } catch(e) {
-      console.warn('[boot] localStorage restore failed:', e.message);
-    }
-
-    // ── 2. Try embedded Excel file
-    if (!data) {
-      try {
-        const excelUrl = (window.__resources && window.__resources.excelFile) || 'uploads/new_workbook.xlsx';
-        const excelSep = excelUrl.includes('?') ? '&' : '?';
-        const resp = await fetch(excelUrl + excelSep + 'v=' + Date.now(), { cache: 'no-store' });
-        if (resp.ok) {
-          const buf = await resp.arrayBuffer();
-          data = parseTechFinancialsXlsxFromArrayBuffer(buf);
-          data._bootSource = 'excel';
-          const loadedAt = new Date();
-          data._asOfDate = _fmtAsOf(loadedAt);
-          data._sourceInfo = {
-            filename: 'uploads/new_workbook.xlsx',
-            timestamp: _fmtSourceTs(loadedAt),
-            rowCount: data.lineItems ? data.lineItems.length : 0,
-            vendorCount: data.vendors ? data.vendors.length : 0,
-            source: 'website workbook'
-          };
-        }
       } catch(e) {
-        console.warn('[boot] Excel load failed, using JSON fallback:', e.message);
+        console.warn('[boot] localStorage restore failed:', e.message);
       }
     }
 
-    // ── 3. Fall back to financials.json
+    // ── 3. Last resort: static data/financials.json
     if (!data) {
-      const jsonUrl = (window.__resources && window.__resources.financialsJson) || 'data/financials.json';
-      const jsonSep = jsonUrl.includes('?') ? '&' : '?';
-      const resp = await fetch(jsonUrl + jsonSep + 'v=' + Date.now(), { cache: 'no-store' });
+      const resp = await fetch((window.__resources && window.__resources.financialsJson) || 'data/financials.json', { cache: 'no-store' });
       data = await resp.json();
       data._bootSource = 'json';
-      const loadedAt = new Date();
-      data._asOfDate = _fmtAsOf(loadedAt);
-      data._sourceInfo = {
-        filename: 'data/financials.json',
-        timestamp: _fmtSourceTs(loadedAt),
-        rowCount: data.lineItems ? data.lineItems.length : 0,
-        vendorCount: data.vendors ? data.vendors.length : 0,
-        source: 'json fallback'
-      };
+      console.warn('[boot] Using static financials.json fallback — xlsx and localStorage both unavailable');
     }
     const root = ReactDOM.createRoot(document.getElementById('app'));
     root.render(<App data={data} />);

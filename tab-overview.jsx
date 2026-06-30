@@ -360,23 +360,59 @@ function OverviewTab({ data }) {
     return { budget: b, forecast: f, actual: a, remaining: f - a, risk: r, opp: Math.abs(o), net: n };
   }, [items, filterActive, data.workbookSubtotal]);
 
-  // ── Category aggregation ─────────────────────────────────────────────
+  // Back Pocket: computed from full workbook lineItems (not filtered).
+  // = |Σ net| where Non-Committed flag = Y / Yes / True / 1 (case-insensitive).
+  // Falls back to data.summary.backPocket if lineItems lack the nonCommitted field
+  // (e.g. pre-fix localStorage data restored at boot).
+  const backPocket = useMemoOV(() => {
+    const src = data.lineItems || [];
+    const isFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
+    const flagged = src.filter(li => isFlag(li.nonCommitted));
+    const sum     = flagged.reduce((s, li) => s + (li.net || 0), 0);
+    console.log('[overview] backPocket lineItems count', src.length);
+    console.log('[overview] backPocket flagged count',   flagged.length);
+    console.log('[overview] backPocket raw sum',         sum);
+    console.log('[overview] backPocket display',         Math.abs(sum));
+    // If no rows flagged but summary carries a pre-computed value, use it as fallback
+    if (flagged.length === 0 && data.summary && data.summary.backPocket > 0) {
+      console.log('[overview] backPocket using summary.backPocket fallback', data.summary.backPocket);
+      return data.summary.backPocket;
+    }
+    return Math.abs(sum);
+  }, [data.lineItems, data.summary]);
+
+  // ── Category aggregation — gross Risk and Opportunity per category ──────
+  // risk = sum of 2026 Risk; opp = abs(sum of 2026 Opportunity).
+  // Red bars (risk) sum to kpi.risk; green bars (opp) sum to kpi.opp.
   const cats = useMemoOV(() => {
     const agg = {};
     for (const li of items) {
       const c = ovCat(li);
-      if (!agg[c]) agg[c] = { b: 0, f: 0 };
-      agg[c].b += li.budget   || 0;
-      agg[c].f += li.forecast || 0;
+      if (!agg[c]) agg[c] = { risk: 0, opp: 0, net: 0 };
+      agg[c].risk += li.risk || 0;
+      agg[c].opp  += Math.abs(li.opp || 0);
+      agg[c].net  += (li.forecast || 0) - (li.budget || 0);
     }
     return OV_CATS.map(cat => {
-      const d = agg[cat] || { b: 0, f: 0 };
-      return { cat, v: Math.round(d.f - d.b) };
+      const d = agg[cat] || { risk: 0, opp: 0, net: 0 };
+      return { cat, risk: Math.round(d.risk), opp: Math.round(d.opp), v: Math.round(d.net) };
     });
   }, [items]);
 
-  const ovMaxAbs   = Math.max(...cats.map(c => Math.abs(c.v)), 1);
-  const ovTotalAbs = cats.reduce((s, c) => s + Math.abs(c.v), 0);
+  const ovMaxBar   = Math.max(...cats.map(c => Math.max(c.risk, c.opp)), 1);
+
+  // Reconciliation: risk bars → kpi.risk; opp bars → kpi.opp.
+  useEffectOV(() => {
+    const chartRiskTotal = cats.reduce((s, c) => s + c.risk, 0);
+    const chartOppTotal  = cats.reduce((s, c) => s + c.opp,  0);
+    const kpiRisk = kpi.risk;
+    const kpiOpp  = kpi.opp;
+    const riskDiff = Math.abs(chartRiskTotal - kpiRisk);
+    const oppDiff  = Math.abs(chartOppTotal  - kpiOpp);
+    console.log('[risk/opp chart reconcile]', { chartRiskTotal, kpiRisk, riskDiff, chartOppTotal, kpiOpp, oppDiff });
+    if (riskDiff > 1000) console.warn('[risk/opp chart] riskDiff > $1K — check data source');
+    if (oppDiff  > 1000) console.warn('[risk/opp chart] oppDiff > $1K — check data source');
+  }, [cats, kpi.risk, kpi.opp]);
 
   // ── Drill-down vendors ────────────────────────────────────────────────
   const drillRows = useMemoOV(() => {
@@ -528,25 +564,28 @@ function OverviewTab({ data }) {
 
       {/* ══ ROW 1 — 4 PRIMARY KPIs ══════════════════════════════════════ */}
       <style>{`
-        .kpi-flip { position: relative; }
-        .kpi-flip-inner { position: relative; width: 100%; height: 100%; }
+        .kpi-flip { position: relative; perspective: 800px; }
+        .kpi-flip-inner {
+          position: relative; width: 100%; height: 100%;
+          transform-style: preserve-3d;
+          transition: transform 0.5s cubic-bezier(0.4,0.2,0.2,1);
+        }
+        .kpi-flip:hover .kpi-flip-inner { transform: rotateY(180deg); }
         .kpi-flip-front, .kpi-flip-back {
           position: absolute; inset: 0;
           display: flex; flex-direction: column;
           align-items: center; justify-content: center;
           padding: 28px; text-align: center;
-          transition: opacity 0.3s ease;
+          backface-visibility: hidden; -webkit-backface-visibility: hidden;
         }
-        .kpi-flip-back { background: #333C66; opacity: 0; }
-        .kpi-flip:hover .kpi-flip-front { opacity: 0; }
-        .kpi-flip:hover .kpi-flip-back { opacity: 1; }
+        .kpi-flip-back { background: #333C66; transform: rotateY(180deg); }
       `}</style>
-      <div style={{ ...CARD, ...MB20, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', overflow: 'hidden' }}>
+      <div style={{ ...CARD, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', overflow: 'hidden', maxWidth: 1050, margin: '0 auto 20px' }}>
         {[
           { label: 'annual budget',      val: fmt.m(kpi.budget),    sub: '2026 approved budget' },
           { label: 'year-end forecast',  val: fmt.m(kpi.forecast),  sub: 'actuals + remaining forecast' },
-          { label: 'ytd actual spend',   val: fmt.m(kpi.actual),    sub: `${kpi.budget > 0 ? (kpi.actual / kpi.budget * 100).toFixed(1) : 0}% of budget consumed` },
-          { label: 'remaining forecast', val: fmt.m(kpi.remaining), sub: 'balance to year-end' },
+          { label: 'back pocket',        val: fmt.m(backPocket),    sub: 'non-committed favorable net position' },
+
         ].map((k, i) => (
           <div key={i} className="kpi-flip" style={{ borderLeft: i > 0 ? `1px solid ${OV.border}` : 'none', height: 128 }}>
             <div className="kpi-flip-inner">
@@ -682,19 +721,22 @@ function OverviewTab({ data }) {
 
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
             <div>
-              <OvEyebrow text="forecast variance · key drivers" />
+              <OvEyebrow text="risk and opportunity · by category" />
               <div style={{ fontFamily: OV.serif, fontWeight: 600, fontSize: 20, color: OV.navy, letterSpacing: '-0.005em' }}>
-                Drivers of Forecast Variance
+                Risk and Opportunity by Category
+              </div>
+              <div style={{ fontSize: 12, color: OV.stone, marginTop: 5, fontFamily: OV.sans }}>
+                Gross downside exposure and favorable upside by category. Totals reconcile to the KPI cards above.
               </div>
             </div>
             <div style={{ display: 'flex', gap: 20, alignItems: 'center', paddingTop: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <div style={{ width: 10, height: 10, background: OV.green, borderRadius: 1 }} />
-                <span style={{ fontSize: 11, color: OV.stone }}>← Favorable</span>
+                <span style={{ fontSize: 11, color: OV.stone }}>← Opportunity</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <div style={{ width: 10, height: 10, background: OV.red, borderRadius: 1 }} />
-                <span style={{ fontSize: 11, color: OV.stone }}>Unfavorable →</span>
+                <span style={{ fontSize: 11, color: OV.stone }}>Risk →</span>
               </div>
             </div>
           </div>
@@ -702,22 +744,21 @@ function OverviewTab({ data }) {
           <div style={{ display: 'flex', marginBottom: 4, paddingLeft: 160 }}>
             <div style={{ flex: 1, textAlign: 'right', paddingRight: 8, fontSize: 9,
               letterSpacing: '0.18em', textTransform: 'uppercase',
-              color: OV.green, fontFamily: OV.sans, fontWeight: 600 }}>← favorable</div>
+              color: OV.green, fontFamily: OV.sans, fontWeight: 600 }}>← opportunity</div>
             <div style={{ width: 2, flexShrink: 0 }} />
             <div style={{ flex: 1, paddingLeft: 8, fontSize: 9,
               letterSpacing: '0.18em', textTransform: 'uppercase',
-              color: OV.red, fontFamily: OV.sans, fontWeight: 600 }}>unfavorable →</div>
+              color: OV.red, fontFamily: OV.sans, fontWeight: 600 }}>risk →</div>
           </div>
           <div style={{ height: 1, background: OV.border, marginLeft: 160 }} />
 
-          {[...cats].sort((a, b) => a.v - b.v).map(({ cat, v }) => {
-            const isSel    = sel === cat;
-            const isFav    = v < 0;
-            const isNeut   = Math.abs(v) < 10000;
-            const barPct   = isNeut ? 0 : (Math.abs(v) / ovMaxAbs) * 82;
-            const color    = isNeut ? '#C7C5C1' : isFav ? OV.green : OV.red;
-            const contPct  = ovTotalAbs > 0 ? (Math.abs(v) / ovTotalAbs * 100).toFixed(0) : '0';
-            const drillable = Math.abs(v) >= 50000;
+          {cats.map(({ cat, risk, opp }) => {
+            const isSel     = sel === cat;
+            const hasRisk   = risk > 500;
+            const hasOpp    = opp  > 500;
+            const drillable = hasRisk || hasOpp;
+            const riskPct   = hasRisk ? (risk / ovMaxBar) * 80 : 0;
+            const oppPct    = hasOpp  ? (opp  / ovMaxBar) * 80 : 0;
 
             return (
               <div key={cat}
@@ -742,35 +783,53 @@ function OverviewTab({ data }) {
                   {isSel && <span style={{ fontSize: 9, color: OV.navy, opacity: 0.5 }}>▾</span>}
                 </div>
 
+                {/* Opportunity — green, extends left */}
                 <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingRight: 3 }}>
-                  {isFav && !isNeut && (<>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 12, color, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
-                        {'−'}{fmt.k(Math.abs(v))}
-                      </div>
+                  {hasOpp && (<>
+                    <div style={{ fontSize: 12, color: OV.green, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                      {fmt.k(opp)}
                     </div>
-                    <div style={{ height: 24, width: `${barPct}%`, background: color,
+                    <div style={{ height: 22, width: `${oppPct}%`, background: OV.green,
                       borderRadius: '3px 0 0 3px', transition: 'width 0.3s ease' }} />
                   </>)}
                 </div>
 
                 <div style={{ width: 2, height: 40, background: '#D4D2CE', flexShrink: 0 }} />
 
+                {/* Risk — red, extends right */}
                 <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 6, paddingLeft: 3 }}>
-                  {!isFav && !isNeut && (<>
-                    <div style={{ height: 24, width: `${barPct}%`, background: color,
+                  {hasRisk && (<>
+                    <div style={{ height: 22, width: `${riskPct}%`, background: OV.red,
                       borderRadius: '0 3px 3px 0', transition: 'width 0.3s ease' }} />
-                    <div>
-                      <div style={{ fontSize: 12, color, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
-                        +{fmt.k(Math.abs(v))}
-                      </div>
+                    <div style={{ fontSize: 12, color: OV.red, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                      {fmt.k(risk)}
                     </div>
                   </>)}
-                  {isNeut && <span style={{ fontSize: 12, color: '#C8C6C2', paddingLeft: 4 }}>—</span>}
+                  {!hasRisk && !hasOpp && <span style={{ fontSize: 12, color: '#C8C6C2', paddingLeft: 4 }}>—</span>}
                 </div>
               </div>
             );
           })}
+
+          {/* Footer totals */}
+          <div style={{
+            display: 'flex', justifyContent: 'flex-end', gap: 32, alignItems: 'center',
+            paddingTop: 14, paddingBottom: 2, marginTop: 6,
+            borderTop: '1px solid #EDECEA',
+          }}>
+            <div style={{ fontSize: 11, color: OV.stone, fontFamily: OV.sans }}>
+              {'Total Opportunity: '}
+              <span style={{ color: OV.green, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                {fmt.m(cats.reduce((s, c) => s + c.opp, 0))}
+              </span>
+            </div>
+            <div style={{ fontSize: 11, color: OV.stone, fontFamily: OV.sans }}>
+              {'Total Risk: '}
+              <span style={{ color: OV.red, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                {fmt.m(cats.reduce((s, c) => s + c.risk, 0))}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Drill-down panel */}

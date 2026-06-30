@@ -28,6 +28,7 @@
     '2026 Net Position': 'net',
     'Notes': 'notes',
     'Total Actuals': 'actual',
+    'Non-Comitted': 'nonCommitted',
   };
 
   const MONTHS_AC = ['Jan AC','Feb AC','Mar AC','Apr AC','May AC','Jun AC','Jul AC','Aug AC','Sep AC','Oct AC','Nov AC','Dec AC'];
@@ -86,6 +87,21 @@
 
     const headerRowIdx = findHeaderRow(rows);
     const colIdx = buildColIndex(rows[headerRowIdx]);
+
+    // ── Robust Non-Committed column detection ─────────────────────────────
+    // Normalize: lowercase + strip ALL whitespace, hyphens, underscores, punctuation.
+    // Handles: Non-Comitted, Non-Committed, Non Comitted, noncommitted, etc.
+    const _normHdr = h => String(h || '').toLowerCase().replace(/[\s\-_.,;:'"()\\/]+/g, '');
+    const _NC_NORMS = new Set(['noncomitted', 'noncommitted', 'noncomited', 'noncommited']);
+    // First try exact HEADERS-map key, then fuzzy scan.
+    let _ncColIdx = (colIdx['Non-Comitted'] != null) ? colIdx['Non-Comitted'] : null;
+    let _ncRawHdr = _ncColIdx != null ? 'Non-Comitted' : null;
+    if (_ncColIdx == null) {
+      for (const [hdr, ci] of Object.entries(colIdx)) {
+        if (_NC_NORMS.has(_normHdr(hdr))) { _ncColIdx = ci; _ncRawHdr = hdr; break; }
+      }
+    }
+    console.log('[parse] Non-Committed column detected: "' + (_ncRawHdr || 'NOT FOUND') + '" → col index ' + _ncColIdx);
 
     // Sanity: required columns
     const required = ['Transaction Type', 'D365 Legal Vendor name', '2026 Final Budget', 'Total Actuals'];
@@ -311,6 +327,8 @@
         monthlyFC: readArr(row, colIdx, MONTHS_FC),
         monthlyOR: readArr(row, colIdx, resolvedOR),
         onestreamCategory: str(rec.onestreamCategory) || '',
+        // Use robust-detected column index directly (bypasses exact HEADERS spelling)
+        nonCommitted: _ncColIdx != null ? str(row[_ncColIdx]) : '',
       };
       lineItems.push(lineItem);
       rowCount++;
@@ -414,6 +432,13 @@
     summary.remaining = summary.forecast - summary.actual;
     summary.rowCount = rowCount;
     summary.excludedCount = excludedCount;
+    // Back Pocket: sum of 2026 Net Position where Non-Committed flag = Y/Yes/True/1
+    // Capitalization rows are already excluded from lineItems — no extra filter needed.
+    const _isNcFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
+    const _bpRows   = lineItems.filter(li => _isNcFlag(li.nonCommitted));
+    const _bpRaw    = _bpRows.reduce((s, li) => s + (li.net || 0), 0);
+    console.log('[parse] Back Pocket → flaggedRows=' + _bpRows.length + ', rawNetSum=$' + Math.round(_bpRaw/1000) + 'K, displayedAbsValue=$' + Math.round(Math.abs(_bpRaw)/1000) + 'K');
+    summary.backPocket = Math.abs(_bpRaw);
 
     // Aggregate by vendor
     const byV = {};

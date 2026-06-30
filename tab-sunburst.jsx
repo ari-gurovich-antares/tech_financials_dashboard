@@ -28,8 +28,7 @@ function catColorSB(cat, depth, idx) {
   const [h,s,l] = _sbH2H(base);
   return _sbH2hex(h, Math.max(18, s - 13*depth - 2.5*(idx||0)), Math.min(86, l + 15*depth + 3.5*(idx||0)));
 }
-// Diverging color for Net Position: negative=favorable(green), positive=unfavorable(red), t=magnitude
-// depth 0=category(full), 1=vendor/zoomed-vendor(lighter), 2=contract(lightest)
+// Diverging color for Net Position mode (computed at component scope for legend access)
 function netDivColorSB(amount, scale, depth) {
   const d = depth || 0;
   const abs = Math.abs(amount);
@@ -55,6 +54,17 @@ function arc(cx, cy, r1, r2, a1, a2) {
   const [x4,y4] = pt(cx, cy, r1, a1);
   return `M${x1.toFixed(2)},${y1.toFixed(2)} A${r2},${r2} 0 ${lg} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L${x3.toFixed(2)},${y3.toFixed(2)} A${r1},${r1} 0 ${lg} 0 ${x4.toFixed(2)},${y4.toFixed(2)}Z`;
 }
+
+// ── Slice label helpers ───────────────────────────────────────────────
+const SB_SHORT_CAT = { 'Infrastructure': 'Infra.', 'Amortization': 'Amort.' };
+function sbShortLabel(name, maxLen) {
+  const mapped = SB_SHORT_CAT[name];
+  if (mapped) return mapped;
+  const ml = maxLen || 15;
+  return name.length > ml ? name.slice(0, ml - 1) + '…' : name;
+}
+function sbFmtAmt(v)   { return (v < 0 ? '−' : '+') + fmt.m(Math.abs(v)).replace('$', ''); }
+function sbAmtColor(v) { return v < 0 ? '#72D4A0' : '#E87878'; }
 
 // ── Tooltip ────────────────────────────────────────────────────────────
 function SBTooltip({ tip }) {
@@ -88,12 +98,11 @@ function SBTooltip({ tip }) {
 //   centerColor    – css color for center value
 //   centerLabel    – small label above center value
 //   isDark         – bool, background is dark
-// Props:
-//   size      – SVG size in px (default 440; use 340 for compact left-column use)
-//   zoomed    – controlled zoom (cat name or null); if omitted, self-manages
-//   onZoom    – called when user clicks to zoom; required when zoomed is provided
+//   size           – SVG ring area in px (default 440). SVG viewport expands by LABEL_PAD on each side.
+//   zoomed         – controlled zoom (cat name or null); if omitted, self-manages
+//   onZoom         – called when user clicks to zoom; required when zoomed is provided
 function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel, isDark,
-                        size, zoomed: zExt, onZoom, diverging, hideLegend }) {
+                        size, zoomed: zExt, onZoom, diverging, hideLegend, onVendorClick, lightBack, highlightVendor, singleRing, sqrtScale }) {
   const [zInt,    setZInt]    = useStateSB(null);
   const [tooltip, setTooltip] = useStateSB(null);
   const [hov,     setHov]     = useStateSB(null);
@@ -104,78 +113,102 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
   const data = items || [];
   if (!data.length) return null;
 
-  const totalAbs = data.reduce((s,c) => s + Math.abs(c.variance), 0);
+  // sqrtScale: compress large segments, expand small ones for visibility
+  const scaleVal = (v) => sqrtScale ? Math.sqrt(Math.abs(v)) : Math.abs(v);
+
+  const totalAbs = data.reduce((s,c) => s + scaleVal(c.variance), 0);
   const SZ = size || 440;
   const SC = SZ / 440;
-  const CX=SZ/2, CY=SZ/2, R0=Math.round(55*SC), R1=Math.round(125*SC), R2=Math.round(188*SC), W=SZ, H=SZ;
+
+  // Label padding: horizontal stays wide (leader lines + text), vertical is minimal
+  const LABEL_PAD   = 175;   // horizontal — kept for label columns
+  const LABEL_PAD_V = 38;    // vertical   — labels rarely need space above/below ring
+  const W = SZ + 2 * LABEL_PAD;
+  const H = SZ + 2 * LABEL_PAD_V;
+  const CX = W / 2;
+  const CY = H / 2;
+
+  // singleRing: use wider band (R0→R2 range) for the single visible ring
+  const R0   = Math.round(55 * SC);
+  const ROUT = singleRing ? Math.round(190 * SC) : Math.round(125 * SC);
+  const R1   = ROUT;
+  const R2   = Math.round(188 * SC);
 
   // Diverging scale for Net Position mode (computed at component scope for legend access)
   const divCatScale = diverging ? Math.max(1, ...data.map(c => Math.abs(c.variance))) : 1;
 
-  // Build segments
+  // Build segments — each segment carries a1/a2 (start/end angles in radians, 0=top, clockwise)
   const segs = [];
   if (!zoomed) {
     let angle = 0;
     data.forEach((cat, ci) => {
-      const catSpan = totalAbs > 0 ? (Math.abs(cat.variance) / totalAbs) * 2 * Math.PI : 0;
-      const isUnfav = cat.variance > 0;
+      const catSpan = totalAbs > 0 ? (scaleVal(cat.variance) / totalAbs) * 2 * Math.PI : 0;
       segs.push({
         key:'c'+ci, type:'cat', label:cat.cat, variance:cat.variance,
         parentLabel:'total', parentAbs:totalAbs,
+        a1:angle, a2:angle+catSpan,
         d:arc(CX,CY,R0,R1,angle,angle+catSpan),
         fill:diverging ? netDivColorSB(cat.variance, divCatScale, 0) : catColorSB(cat.cat,0,ci),
         onClick:()=>setZoomed(cat.cat),
         hint:'Click to drill into vendors',
       });
-      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
-      let va = angle;
-      cat.vendors.forEach((vnd,vi) => {
-        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*catSpan : 0;
-        segs.push({
-          key:'v'+ci+'_'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
-          labelFull:vnd.name, variance:vnd.variance,
-          parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
-          d:arc(CX,CY,R1,R2,va,va+vSpan),
-          fill:diverging ? netDivColorSB(vnd.variance, divCatScale, 1) : catColorSB(cat.cat,1,vi),
-          onClick:()=>setZoomed(cat.cat),
-          hint:'Click to drill in',
+      if (!singleRing) {
+        const catAbsVnd = cat.vendors.reduce((s,v)=>s+scaleVal(v.variance),0);
+        let va = angle;
+        cat.vendors.forEach((vnd,vi) => {
+          const vSpan = catAbsVnd > 0 ? (scaleVal(vnd.variance)/catAbsVnd)*catSpan : 0;
+          segs.push({
+            key:'v'+ci+'_'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
+            labelFull:vnd.name, variance:vnd.variance,
+            parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
+            a1:va, a2:va+vSpan,
+            d:arc(CX,CY,R1,R2,va,va+vSpan),
+            fill:diverging ? netDivColorSB(vnd.variance, divCatScale, 1) : catColorSB(cat.cat,1,vi),
+            onClick:()=>{ setZoomed(cat.cat); onVendorClick && onVendorClick(vnd.labelFull||vnd.name); },
+            hint:'Click to select vendor',
+          });
+          va += vSpan;
         });
-        va += vSpan;
-      });
+      }
       angle += catSpan;
     });
   } else {
     const cat = data.find(c=>c.cat===zoomed);
     if (cat) {
-      const isUnfav = cat.variance > 0;
       const divVndScale = diverging ? Math.max(1, ...cat.vendors.map(v => Math.abs(v.variance))) : 1;
-      const catAbsVnd = cat.vendors.reduce((s,v)=>s+Math.abs(v.variance),0);
+      const catAbsVnd = cat.vendors.reduce((s,v)=>s+scaleVal(v.variance),0);
       let va = 0;
       cat.vendors.forEach((vnd,vi) => {
-        const vSpan = catAbsVnd > 0 ? (Math.abs(vnd.variance)/catAbsVnd)*2*Math.PI : 0;
+        const vSpan = catAbsVnd > 0 ? (scaleVal(vnd.variance)/catAbsVnd)*2*Math.PI : 0;
         segs.push({
           key:'zv'+vi, type:'vendor', label:vnd.name.length>30?vnd.name.slice(0,29)+'…':vnd.name,
           labelFull:vnd.name, variance:vnd.variance,
           parentLabel:cat.cat, parentAbs:Math.abs(cat.variance),
+          a1:va, a2:va+vSpan,
           d:arc(CX,CY,R0,R1,va,va+vSpan),
-          fill:diverging ? netDivColorSB(vnd.variance, divVndScale, 0) : catColorSB(zoomed,1,vi), onClick:null,
+          fill:diverging ? netDivColorSB(vnd.variance, divVndScale, 0) : catColorSB(zoomed,1,vi),
+          onClick: onVendorClick ? ()=>onVendorClick(vnd.labelFull||vnd.name) : null,
+          hint: onVendorClick ? 'Click to select vendor' : null,
         });
-        const divCtScale = diverging ? Math.max(1, ...vnd.contracts.map(c => Math.abs(c.variance))) : 1;
-        const vndAbsCt = vnd.contracts.reduce((s,c)=>s+Math.abs(c.variance),0);
-        let ca = va;
-        vnd.contracts.forEach((ct,ci) => {
-          const cSpan = vndAbsCt > 0 ? (Math.abs(ct.variance)/vndAbsCt)*vSpan : 0;
-          segs.push({
-            key:'zc'+vi+'_'+ci, type:'contract',
-            label:ct.name.length>34?ct.name.slice(0,33)+'…':ct.name,
-            labelFull:ct.name, variance:ct.variance,
-            parentLabel:vnd.name.length>18?vnd.name.slice(0,17)+'…':vnd.name,
-            parentAbs:Math.abs(vnd.variance),
-            d:arc(CX,CY,R1,R2,ca,ca+cSpan),
-            fill:diverging ? netDivColorSB(ct.variance, divCtScale, 1) : catColorSB(zoomed,2,ci), onClick:null,
+        if (!singleRing) {
+          const divCtScale = diverging ? Math.max(1, ...vnd.contracts.map(c => Math.abs(c.variance))) : 1;
+          const vndAbsCt = vnd.contracts.reduce((s,c)=>s+Math.abs(c.variance),0);
+          let ca = va;
+          vnd.contracts.forEach((ct,ci) => {
+            const cSpan = vndAbsCt > 0 ? (Math.abs(ct.variance)/vndAbsCt)*vSpan : 0;
+            segs.push({
+              key:'zc'+vi+'_'+ci, type:'contract',
+              label:ct.name.length>34?ct.name.slice(0,33)+'…':ct.name,
+              labelFull:ct.name, variance:ct.variance,
+              parentLabel:vnd.name.length>18?vnd.name.slice(0,17)+'…':vnd.name,
+              parentAbs:Math.abs(vnd.variance),
+              a1:ca, a2:ca+cSpan,
+              d:arc(CX,CY,R1,R2,ca,ca+cSpan),
+              fill:diverging ? netDivColorSB(ct.variance, divCtScale, 1) : catColorSB(zoomed,2,ci), onClick:null,
+            });
+            ca += cSpan;
           });
-          ca += cSpan;
-        });
+        }
         va += vSpan;
       });
     }
@@ -199,11 +232,125 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
         color: diverging ? netDivColorSB(c.variance, divCatScale, 0) : catColorSB(c.cat,0,i),
         onClick:()=>setZoomed(c.cat) }));
 
-  const bg  = isDark ? 'transparent' : '#F9F8F5';
-  const lgC = isDark ? 'rgba(255,255,255,0.82)' : 'var(--antares-soft-black)';
-  const sgC = isDark ? 'var(--antares-stone-gray)' : 'var(--antares-stone-gray)';
+  const bg          = isDark ? 'transparent' : '#F9F8F5';
+  const lgC         = isDark ? 'rgba(255,255,255,0.82)' : 'var(--antares-soft-black)';
+  const sgC         = isDark ? 'var(--antares-stone-gray)' : 'var(--antares-stone-gray)';
+  const compact     = SZ < 400;
+  const lblText     = isDark ? 'rgba(255,255,255,0.96)' : 'rgba(18,18,32,0.90)';
+  const lblShadow   = isDark ? 'rgba(0,0,0,0.82)' : 'rgba(255,255,255,0.88)';
+  const leaderStroke= isDark ? 'rgba(255,255,255,0.40)' : 'rgba(40,40,60,0.38)';
+  const hintColor   = isDark ? 'rgba(255,255,255,0.34)' : 'rgba(40,40,60,0.40)';
 
-  const compact = SZ < 400;
+  // ── Slice label renderer ──────────────────────────────────────────────
+  function renderSliceLabels() {
+    // Categories in default view; every vendor in zoomed view
+    const eligible = !zoomed
+      ? segs.filter(s => s.type === 'cat')
+      : segs.filter(s => s.type === 'vendor');
+    if (!eligible.length) return null;
+
+    const labelCap = zoomed ? eligible.length : 8;
+    const topN = [...eligible]
+      .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
+      .slice(0, labelCap);
+
+    const MIN_SPAN      = 0.04;
+    const INTERNAL_SPAN = 0.32;
+    const EXT_R         = R2 + Math.round(22 * SC);
+    const hLen          = Math.round(16 * SC);
+    const COL_DIST      = EXT_R + hLen;
+    const fs            = Math.max(9.5, Math.round(10.5 * SC));
+    const LINE_H        = Math.round(fs + 3);
+
+    const rightBucket = [], leftBucket = [], internalBucket = [];
+
+    topN.forEach((s, idx) => {
+      const span = s.a2 - s.a1;
+      if (!zoomed && span < MIN_SPAN) return;
+      const midA = (s.a1 + s.a2) / 2;
+      const ca   = Math.cos(midA - Math.PI / 2);
+      const sa   = Math.sin(midA - Math.PI / 2);
+      const name = sbShortLabel(s.label, 22);
+      if (span >= INTERNAL_SPAN) {
+        internalBucket.push({ ca, sa, name, idx });
+      } else {
+        const entry = {
+          ca, sa, name, idx,
+          naturalY: CY + sa * EXT_R,
+          y:        CY + sa * EXT_R,
+          startX:   CX + (R1 + 5) * ca,
+          startY:   CY + (R1 + 5) * sa,
+          radX:     CX + EXT_R * ca,
+          radY:     CY + EXT_R * sa,
+        };
+        if (ca >= 0) rightBucket.push(entry); else leftBucket.push(entry);
+      }
+    });
+
+    rightBucket.sort((a, b) => a.naturalY - b.naturalY);
+    leftBucket.sort((a,  b) => a.naturalY - b.naturalY);
+
+    function spread(arr) {
+      if (arr.length < 2) return;
+      const pad = fs * 1.5;
+      arr.forEach(p => { p.y = Math.max(pad, Math.min(H - pad, p.y)); });
+      for (let iter = 0; iter < 80; iter++) {
+        let moved = false;
+        for (let i = 1; i < arr.length; i++) {
+          const gap = arr[i].y - arr[i-1].y;
+          if (gap < LINE_H) { const push = (LINE_H - gap) / 2; arr[i-1].y -= push; arr[i].y += push; moved = true; }
+        }
+        for (let i = arr.length - 2; i >= 0; i--) {
+          const gap = arr[i+1].y - arr[i].y;
+          if (gap < LINE_H) { const push = (LINE_H - gap) / 2; arr[i].y -= push; arr[i+1].y += push; moved = true; }
+        }
+        if (!moved) break;
+      }
+      arr.forEach(p => { p.y = Math.max(pad, Math.min(H - pad, p.y)); });
+    }
+
+    spread(rightBucket);
+    spread(leftBucket);
+
+    const nodes = [];
+
+    internalBucket.forEach(({ ca, sa, name, idx }) => {
+      const midR = R0 + (R1 - R0) * 0.54;
+      const tx = CX + midR * ca, ty = CY + midR * sa;
+      nodes.push(
+        <g key={'il'+idx} style={{ pointerEvents:'none' }}>
+          <text x={tx} y={ty + fs * 0.35} textAnchor="middle"
+            fontSize={fs} fontWeight="700" fontFamily={SB_SANS}
+            fill={lblText} stroke={lblShadow} strokeWidth="2.5" paintOrder="stroke">{name}</text>
+        </g>
+      );
+    });
+
+    [...rightBucket, ...leftBucket].forEach(({ startX, startY, radX, radY, y, name, idx, ca }) => {
+      const hDir  = ca >= 0 ? 1 : -1;
+      // Clamp text column so labels never clip at left or right edge of SVG
+      const EST_W      = 195;   // conservative worst-case px width for 22-char bold label
+      const MARGIN     = 6;
+      const naturalCol = CX + hDir * COL_DIST;
+      const colX  = ca >= 0
+        ? Math.min(naturalCol, W - MARGIN - EST_W)   // right: don't push past right edge
+        : Math.max(naturalCol, MARGIN + EST_W);       // left:  don't pull past left edge
+      const textX  = ca >= 0 ? colX + 3 : colX - 3;
+      const anchor = ca >= 0 ? 'start' : 'end';
+      nodes.push(
+        <g key={'el'+idx} style={{ pointerEvents:'none' }}>
+          <polyline
+            points={`${startX.toFixed(1)},${startY.toFixed(1)} ${radX.toFixed(1)},${radY.toFixed(1)} ${colX.toFixed(1)},${y.toFixed(1)}`}
+            fill="none" stroke={leaderStroke} strokeWidth="1" />
+          <text x={textX} y={y + fs * 0.35} textAnchor={anchor}
+            fontSize={fs} fontWeight="700" fontFamily={SB_SANS}
+            fill={lblText} stroke={lblShadow} strokeWidth="2.5" paintOrder="stroke">{name}</text>
+        </g>
+      );
+    });
+
+    return nodes;
+  }
 
   return (
     <div style={{ position:'relative' }} onMouseLeave={onLeave}>
@@ -212,23 +359,40 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
         <div style={{ flexShrink:0, position:'relative' }}>
           {zoomed && (
             <button onClick={()=>{setZoomed(null);setTooltip(null);}} style={{
-              position:'absolute', top:6, right:6, zIndex:2, background:'none',
-              border:'1px solid rgba(255,255,255,0.22)', borderRadius:2,
-              padding:'3px 10px', fontSize:11, cursor:'pointer',
-              color:'rgba(255,255,255,0.7)', fontFamily:SB_SANS,
+              position:'absolute', top:8, right:8, zIndex:2, background:'none',
+              border: lightBack ? '1px solid #C8C6C0' : '1px solid rgba(255,255,255,0.22)',
+              borderRadius:4, padding:'4px 12px', fontSize:11, cursor:'pointer',
+              color: lightBack ? '#555' : 'rgba(255,255,255,0.7)',
+              fontFamily:SB_SANS, fontWeight:600,
             }}>← back</button>
           )}
           <svg width={W} height={H} style={{ display:'block' }}>
+            {/* Background fill behind rings only */}
             <circle cx={CX} cy={CY} r={R2+4} fill={bg} />
+
+            {/* Ring slices */}
             {segs.map(s=>(
               <path key={s.key} d={s.d} fill={s.fill}
-                fillOpacity={hov===s.key?1:0.82} stroke={isDark?'rgba(0,0,0,0.35)':'#fff'} strokeWidth="1.5"
-                style={{ cursor:s.onClick?'pointer':'default', transition:'fill-opacity 0.1s' }}
+                fillOpacity={
+                  highlightVendor
+                    ? (s.labelFull === highlightVendor || s.label === highlightVendor ? 1 : 0.38)
+                    : (hov===s.key ? 1 : 0.82)
+                }
+                stroke={isDark?'rgba(0,0,0,0.35)':'#fff'}
+                strokeWidth={highlightVendor && (s.labelFull === highlightVendor || s.label === highlightVendor) ? 2.5 : 1.5}
+                style={{ cursor:s.onClick?'pointer':'default', transition:'fill-opacity 0.15s, stroke-width 0.15s' }}
                 onMouseMove={e=>onMove(e,s)} onMouseEnter={e=>onMove(e,s)} onClick={s.onClick}
               />
             ))}
+
+            {/* Slice labels — rendered above ring paths, below center hole */}
+            {renderSliceLabels()}
+
+            {/* Center hole */}
             <circle cx={CX} cy={CY} r={R0-3} fill={isDark?'rgba(0,0,0,0.4)':'#fff'}
               stroke={isDark?'rgba(255,255,255,0.12)':'var(--color-border)'} strokeWidth="1" />
+
+            {/* Center label — category/kpi name */}
             {(()=>{
               const rawLbl = zoomed ? (data.find(c=>c.cat===zoomed)?.cat||'') : (centerLabel||'');
               const words = rawLbl.trim().split(/\s+/).filter(Boolean);
@@ -246,49 +410,75 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
                 </text>
               );
             })()}
+
+            {/* Center value */}
             <text x={CX} y={CY+7} textAnchor="middle" fontFamily={SB_SERIF} fontWeight="600"
               fontSize="15" fill={zoomed?(data.find(c=>c.cat===zoomed)?.variance>0?SB_RED:SB_GREEN):centerColor}>
               {zoomed
                 ? ((data.find(c=>c.cat===zoomed)?.variance||0)<0?'−':'+') + fmt.m(Math.abs(data.find(c=>c.cat===zoomed)?.variance||0))
                 : centerSign + fmt.m(totalAmount)}
             </text>
-            {!hideLegend && <text x={CX} y={CY+21} textAnchor="middle" fontFamily={SB_SANS} fontSize="9"
-              fill={isDark?'rgba(255,255,255,0.38)':'var(--antares-stone-gray)'}>
-              {zoomed ? 'click ← to reset' : 'click segment to drill'}
-            </text>}
+
+            {/* Center interaction hint (only when right-side legend is visible) */}
+            {!hideLegend && (
+              <text x={CX} y={CY+21} textAnchor="middle" fontFamily={SB_SANS} fontSize="9"
+                fill={isDark?'rgba(255,255,255,0.38)':'var(--antares-stone-gray)'}>
+                {zoomed ? 'click ← to reset' : 'click segment to drill'}
+              </text>
+            )}
+
+            {/* Ring hierarchy legend — always visible, sits below the chart in LABEL_PAD space */}
+            <text
+              x={CX}
+              y={CY + R2 + Math.round(LABEL_PAD * 0.66)}
+              textAnchor="middle"
+              fontFamily={SB_SANS}
+              fontSize={Math.max(9, Math.round(9.5 * SC))}
+              fill={hintColor}
+              letterSpacing="0.01em">
+              {singleRing
+                ? (zoomed
+                    ? 'Vendors  ·  Click ← to reset'
+                    : 'Categories  ·  Click a slice to drill into vendors')
+                : (zoomed
+                    ? 'Inner: Vendor  ·  Outer: Contract  ·  Click ← to reset'
+                    : 'Inner ring: Category  ·  Outer ring: Vendor  ·  Click a slice to drill in')}
+            </text>
           </svg>
         </div>
+
+        {/* Right-side legend list (hidden in drill panels via hideLegend) */}
         {!hideLegend && (
-        <div style={{ paddingTop:14, minWidth:190, maxWidth:240 }}>
-          <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
-            color:isDark?'rgba(255,255,255,0.4)':SB_NAVY, fontFamily:SB_SERIF, marginBottom:12 }}>
-            {zoomed ? zoomed + ' — Vendors' : 'Categories'}
+          <div style={{ paddingTop:14, minWidth:190, maxWidth:240 }}>
+            <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
+              color:isDark?'rgba(255,255,255,0.4)':SB_NAVY, fontFamily:SB_SERIF, marginBottom:12 }}>
+              {zoomed ? zoomed + ' — Vendors' : 'Categories'}
+            </div>
+            {legendItems.map((item,i)=>(
+              <div key={i} onClick={item.onClick}
+                style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6,
+                  cursor:item.onClick?'pointer':'default', opacity:1, transition:'opacity 0.1s' }}
+                onMouseEnter={e=>{if(item.onClick)e.currentTarget.style.opacity='0.7';}}
+                onMouseLeave={e=>{e.currentTarget.style.opacity='1';}}>
+                <div style={{ width:11, height:11, background:item.color, flexShrink:0, borderRadius:2 }} />
+                <div style={{ fontSize:12, color:lgC, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {item.label}
+                </div>
+                <div style={{ fontSize:12, fontWeight:600, fontVariantNumeric:'tabular-nums', fontFamily:SB_SANS,
+                  flexShrink:0, color:item.variance>0?SB_RED:SB_GREEN }}>
+                  {item.variance>0?'+':'−'}{fmt.k(Math.abs(item.variance))}
+                </div>
+              </div>
+            ))}
+            {!zoomed && (
+              <div style={{ marginTop:12, paddingTop:8, borderTop:`1px solid ${isDark?'rgba(255,255,255,0.1)':'var(--color-border)'}`,
+                fontSize:11, color:sgC, lineHeight:1.6 }}>
+                Inner: categories<br/>
+                Outer: vendors<br/>
+                Click to drill in
+              </div>
+            )}
           </div>
-          {legendItems.map((item,i)=>(
-            <div key={i} onClick={item.onClick}
-              style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6,
-                cursor:item.onClick?'pointer':'default', opacity:1, transition:'opacity 0.1s' }}
-              onMouseEnter={e=>{if(item.onClick)e.currentTarget.style.opacity='0.7';}}
-              onMouseLeave={e=>{e.currentTarget.style.opacity='1';}}>
-              <div style={{ width:11, height:11, background:item.color, flexShrink:0, borderRadius:2 }} />
-              <div style={{ fontSize:12, color:lgC, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {item.label}
-              </div>
-              <div style={{ fontSize:12, fontWeight:600, fontVariantNumeric:'tabular-nums', fontFamily:SB_SANS,
-                flexShrink:0, color:item.variance>0?SB_RED:SB_GREEN }}>
-                {item.variance>0?'+':'−'}{fmt.k(Math.abs(item.variance))}
-              </div>
-            </div>
-          ))}
-          {!zoomed && (
-            <div style={{ marginTop:12, paddingTop:8, borderTop:`1px solid ${isDark?'rgba(255,255,255,0.1)':'var(--color-border)'}`,
-              fontSize:11, color:sgC, lineHeight:1.6 }}>
-              Inner: categories<br/>
-              Outer: vendors<br/>
-              Click to drill in
-            </div>
-          )}
-        </div>
         )}
       </div>
     </div>

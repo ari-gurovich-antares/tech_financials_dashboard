@@ -697,7 +697,7 @@ html, body {
 }
 
 /* Wide drill panel (used by Domain Owner drill) */
-.drill-panel-wide { width: 1080px !important; max-width: 96vw !important; }
+.drill-panel-wide { width: 1540px !important; max-width: 96vw !important; }
 
 /* Static info chip (e.g. domain pills in drill-down) */
 .chip-static {

@@ -173,17 +173,13 @@ function KPIDrillPanel({ mode, rawData, onClose }) {
         <div style={{ flex:1, overflow:'hidden', display:'flex', minHeight:0 }}>
 
           {/* LEFT: Sunburst */}
-          <div style={{ width:430, flexShrink:0, borderRight:'1px solid rgba(255,255,255,0.08)',
-            overflow:'auto', padding:'16px 8px' }}>
-            <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
-              color:'rgba(255,255,255,0.36)', fontFamily:DRP_SERIF, marginBottom:8, paddingLeft:8 }}>
-              Navigate by clicking
-            </div>
+          <div style={{ width:880, flexShrink:0, borderRight:'1px solid rgba(255,255,255,0.08)',
+            overflow:'auto', padding:'16px 4px' }}>
             <SunburstView
               items={items} totalAmount={raw.total}
               centerSign={sign} centerColor={accent} centerLabel={kpiLbl}
-              isDark={true} size={360}
-              zoomed={selCat} onZoom={pickCat}
+              isDark={true} size={500} singleRing={true}
+              zoomed={selCat} onZoom={pickCat} onVendorClick={pickVendor}
               hideLegend={true}
             />
           </div>
@@ -362,17 +358,13 @@ function NetDrillPanel({ onClose, rawData }) {
         <div style={{ flex:1, overflow:'hidden', display:'flex', minHeight:0 }}>
 
           {/* LEFT: Sunburst */}
-          <div style={{ width:430, flexShrink:0, borderRight:'1px solid rgba(255,255,255,0.08)',
-            overflow:'auto', padding:'16px 8px' }}>
-            <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
-              color:'rgba(255,255,255,0.36)', fontFamily:DRP_SERIF, marginBottom:8, paddingLeft:8 }}>
-              Navigate by clicking
-            </div>
+          <div style={{ width:880, flexShrink:0, borderRight:'1px solid rgba(255,255,255,0.08)',
+            overflow:'auto', padding:'16px 4px' }}>
             <SunburstView
               items={items} totalAmount={Math.abs(netSrc.total)}
               centerSign={netFav?'−':'+'} centerColor={netAccent} centerLabel="Net Position"
-              isDark={true} size={360}
-              zoomed={selCat} onZoom={pickCat}
+              isDark={true} size={500} singleRing={true}
+              zoomed={selCat} onZoom={pickCat} onVendorClick={pickVendor}
               diverging={true}
               hideLegend={true}
             />
