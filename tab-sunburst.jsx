@@ -272,10 +272,11 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
       const sa   = Math.sin(midA - Math.PI / 2);
       const name = sbShortLabel(s.label, 22);
       if (span >= INTERNAL_SPAN) {
-        internalBucket.push({ ca, sa, name, idx });
+        internalBucket.push({ ca, sa, name, idx, onClick: s.onClick });
       } else {
         const entry = {
           ca, sa, name, idx,
+          onClick: s.onClick,
           naturalY: CY + sa * EXT_R,
           y:        CY + sa * EXT_R,
           startX:   CX + (R1 + 5) * ca,
@@ -314,11 +315,11 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
 
     const nodes = [];
 
-    internalBucket.forEach(({ ca, sa, name, idx }) => {
+    internalBucket.forEach(({ ca, sa, name, idx, onClick }) => {
       const midR = R0 + (R1 - R0) * 0.54;
       const tx = CX + midR * ca, ty = CY + midR * sa;
       nodes.push(
-        <g key={'il'+idx} style={{ pointerEvents:'none' }}>
+        <g key={'il'+idx} onClick={onClick} style={{ pointerEvents: onClick ? 'all' : 'none', cursor: onClick ? 'pointer' : 'default' }}>
           <text x={tx} y={ty + fs * 0.35} textAnchor="middle"
             fontSize={fs} fontWeight="700" fontFamily={SB_SANS}
             fill={lblText} stroke={lblShadow} strokeWidth="2.5" paintOrder="stroke">{name}</text>
@@ -326,7 +327,7 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
       );
     });
 
-    [...rightBucket, ...leftBucket].forEach(({ startX, startY, radX, radY, y, name, idx, ca }) => {
+    [...rightBucket, ...leftBucket].forEach(({ startX, startY, radX, radY, y, name, idx, ca, onClick }) => {
       const hDir  = ca >= 0 ? 1 : -1;
       const EST_W      = 195;
       const MARGIN     = 6;
@@ -337,7 +338,7 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
       const textX  = hDir > 0 ? colX + 3 : colX - 3;
       const anchor = hDir > 0 ? 'start' : 'end';
       nodes.push(
-        <g key={'el'+idx} style={{ pointerEvents:'none' }}>
+        <g key={'el'+idx} onClick={onClick} style={{ pointerEvents: onClick ? 'all' : 'none', cursor: onClick ? 'pointer' : 'default' }}>
           <polyline
             points={`${startX.toFixed(1)},${startY.toFixed(1)} ${radX.toFixed(1)},${radY.toFixed(1)} ${colX.toFixed(1)},${y.toFixed(1)}`}
             fill="none" stroke={leaderStroke} strokeWidth="1" />

@@ -518,7 +518,7 @@ function VendorDetail({ vendor: v, onClose }) {
 
 // ── All Vendors Table (expandable) ───────────────────────────────────────
 function AllVendorsTable({ vendors, onSelect }) {
-  const sorted = useMemoV(() => [...vendors].sort((a,b) => b.forecast - a.forecast), [vendors]);
+  const sorted = useMemoV(() => [...vendors].sort((a,b) => a.vendor.localeCompare(b.vendor)), [vendors]);
   return (
     <div className="card" style={{ padding:0, overflow:'hidden', marginTop:4 }}>
       <table className="tbl">
@@ -567,7 +567,10 @@ function VendorsTab({ data }) {
   const searchResults = useMemoV(() => {
     if (!search.trim()) return [];
     const q = search.toLowerCase();
-    return realVendors.filter(v => v.vendor.toLowerCase().includes(q)).slice(0, 8);
+    return realVendors
+      .filter(v => v.vendor.toLowerCase().includes(q))
+      .sort((a, b) => a.vendor.localeCompare(b.vendor, undefined, { sensitivity: 'base' }))
+      .slice(0, 8);
   }, [vendors, search]);
 
   function handleSelect(v) {
