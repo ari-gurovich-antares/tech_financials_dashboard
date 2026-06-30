@@ -4,7 +4,7 @@ const fmt = {
     if (n === null || n === undefined || isNaN(n)) return '$0';
     const sign = n < 0 ? '-' : '';
     const abs = Math.abs(n);
-    if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(2)}M`;
+    if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(1)}M`;
     if (abs >= 1e3) return `${sign}$${(abs/1e3).toFixed(0)}K`;
     return `${sign}$${abs.toFixed(0)}`;
   },
@@ -15,23 +15,23 @@ const fmt = {
     if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(1)}M`;
     return `${sign}$${(abs/1e3).toFixed(0)}K`;
   },
-  // 2-decimal currency: $1.23M / $123.45K / $1,234.56
+  // 1-decimal currency: $1.2M / $123.4K / $1,234.6
   m2: (n) => {
-    if (n === null || n === undefined || isNaN(n)) return '$0.00';
+    if (n === null || n === undefined || isNaN(n)) return '$0.0';
     const sign = n < 0 ? '-' : '';
     const abs = Math.abs(n);
-    if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(2)}M`;
-    if (abs >= 1e3) return `${sign}$${(abs/1e3).toFixed(2)}K`;
-    return `${sign}$${abs.toFixed(2)}`;
+    if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(1)}M`;
+    if (abs >= 1e3) return `${sign}$${(abs/1e3).toFixed(1)}K`;
+    return `${sign}$${abs.toFixed(1)}`;
   },
   signed2: (n) => {
-    if (!n || Math.abs(n) < 0.005) return '$0.00';
+    if (!n || Math.abs(n) < 0.005) return '$0.0';
     const sign = n < 0 ? '-' : '';
     const abs = Math.abs(n);
     let body;
-    if (abs >= 1e6) body = `$${(abs/1e6).toFixed(2)}M`;
-    else if (abs >= 1e3) body = `$${(abs/1e3).toFixed(2)}K`;
-    else body = `$${abs.toFixed(2)}`;
+    if (abs >= 1e6) body = `$${(abs/1e6).toFixed(1)}M`;
+    else if (abs >= 1e3) body = `$${(abs/1e3).toFixed(1)}K`;
+    else body = `$${abs.toFixed(1)}`;
     return (n > 0 ? '+' : '-') + body;
   },
   pct: (n) => `${(n*100).toFixed(1)}%`,
