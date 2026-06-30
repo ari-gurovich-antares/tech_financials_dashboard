@@ -4,7 +4,7 @@
 // Bumped every time the standalone is re-bundled with a new workbook.
 // Boot uses this to decide whether localStorage (a user upload) is newer
 // than the embedded Excel. Stale localStorage without an uploadTs loses.
-const BUNDLE_DATE = '2026-06-30T22:00:00Z'; // bumped: final production cleanup, stale localStorage invalidated
+const BUNDLE_DATE = '2026-06-30T23:30:00Z'; // bumped: clickable labels, alpha vendor sort, 1-decimal fmt
 
 const { useState: useStateA, useEffect, useMemo: useMemoA } = React;
 
