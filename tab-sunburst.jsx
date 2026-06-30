@@ -122,7 +122,7 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
 
   // Label padding: horizontal stays wide (leader lines + text), vertical is minimal
   const LABEL_PAD   = 175;   // horizontal — kept for label columns
-  const LABEL_PAD_V = 38;    // vertical   — labels rarely need space above/below ring
+  const LABEL_PAD_V = (singleRing && zoomed) ? 180 : 58;    // vertical   — more room when zoomed vendor drill has many labels
   const W = SZ + 2 * LABEL_PAD;
   const H = SZ + 2 * LABEL_PAD_V;
   const CX = W / 2;
@@ -254,13 +254,13 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
       .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance))
       .slice(0, labelCap);
 
-    const MIN_SPAN      = 0.04;
-    const INTERNAL_SPAN = 0.32;
+    const MIN_SPAN      = singleRing && !zoomed ? 0.22 : 0.04;
+    const INTERNAL_SPAN = singleRing && !zoomed ? 0.22 : 0.32;
     const EXT_R         = R2 + Math.round(22 * SC);
     const hLen          = Math.round(16 * SC);
     const COL_DIST      = EXT_R + hLen;
     const fs            = Math.max(9.5, Math.round(10.5 * SC));
-    const LINE_H        = Math.round(fs + 3);
+    const LINE_H        = Math.round(fs + (singleRing && zoomed ? 3 : 9));
 
     const rightBucket = [], leftBucket = [], internalBucket = [];
 
@@ -294,7 +294,7 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
       if (arr.length < 2) return;
       const pad = fs * 1.5;
       arr.forEach(p => { p.y = Math.max(pad, Math.min(H - pad, p.y)); });
-      for (let iter = 0; iter < 80; iter++) {
+      for (let iter = 0; iter < (arr.length > 20 ? 200 : 80); iter++) {
         let moved = false;
         for (let i = 1; i < arr.length; i++) {
           const gap = arr[i].y - arr[i-1].y;
@@ -328,15 +328,14 @@ function SunburstView({ items, totalAmount, centerSign, centerColor, centerLabel
 
     [...rightBucket, ...leftBucket].forEach(({ startX, startY, radX, radY, y, name, idx, ca }) => {
       const hDir  = ca >= 0 ? 1 : -1;
-      // Clamp text column so labels never clip at left or right edge of SVG
-      const EST_W      = 195;   // conservative worst-case px width for 22-char bold label
+      const EST_W      = 195;
       const MARGIN     = 6;
       const naturalCol = CX + hDir * COL_DIST;
-      const colX  = ca >= 0
-        ? Math.min(naturalCol, W - MARGIN - EST_W)   // right: don't push past right edge
-        : Math.max(naturalCol, MARGIN + EST_W);       // left:  don't pull past left edge
-      const textX  = ca >= 0 ? colX + 3 : colX - 3;
-      const anchor = ca >= 0 ? 'start' : 'end';
+      const colX  = hDir > 0
+        ? Math.min(naturalCol, W - MARGIN - EST_W)
+        : Math.max(naturalCol, MARGIN + EST_W);
+      const textX  = hDir > 0 ? colX + 3 : colX - 3;
+      const anchor = hDir > 0 ? 'start' : 'end';
       nodes.push(
         <g key={'el'+idx} style={{ pointerEvents:'none' }}>
           <polyline

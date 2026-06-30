@@ -4,7 +4,7 @@
 // Bumped every time the standalone is re-bundled with a new workbook.
 // Boot uses this to decide whether localStorage (a user upload) is newer
 // than the embedded Excel. Stale localStorage without an uploadTs loses.
-const BUNDLE_DATE = '2026-06-30T20:00:00Z'; // bumped: xlsx-first boot, cache-busting, localStorage demoted to fallback
+const BUNDLE_DATE = '2026-06-30T22:00:00Z'; // bumped: final production cleanup, stale localStorage invalidated
 
 const { useState: useStateA, useEffect, useMemo: useMemoA } = React;
 
@@ -28,10 +28,10 @@ function App({ data: initialData }) {
   const [uploadOpen, setUploadOpen] = useStateA(false);
   const [uploadKey,  setUploadKey]  = useStateA(0);
   const [sourceInfo, setSourceInfo] = useStateA(() => {
-    // Prefer the source information from the workbook loaded at boot.
-    // Do not let stale localStorage timestamps override the current GitHub workbook.
-    if (initialData && initialData._sourceInfo) return initialData._sourceInfo;
     try { const s = localStorage.getItem('techfin-source-v1'); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  const [asOfDate, setAsOfDate] = useStateA(() => {
+    try { return localStorage.getItem('techfin-asof-v1') || 'Jun 22, 2026'; } catch { return 'Jun 22, 2026'; }
   });
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -66,6 +66,7 @@ function App({ data: initialData }) {
       const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
       localStorage.setItem('techfin-asof-v1', asof);
       setSourceInfo(info);
+      setAsOfDate(asof);
     } catch(e) {
       console.warn('[upload] localStorage write failed:', e.message);
     }
@@ -236,20 +237,11 @@ function App({ data: initialData }) {
     try {
       const xlsxUrl = (window.__resources && window.__resources.excelFile)
         || ('uploads/new_workbook.xlsx?v=' + Date.now());
-      const resp = await fetch(xlsxUrl, { cache: 'no-store' });
+      const resp = await fetch(xlsxUrl);
       if (resp.ok) {
         const buf = await resp.arrayBuffer();
         data = parseTechFinancialsXlsxFromArrayBuffer(buf);
         data._bootSource = 'excel';
-        data._sourceInfo = {
-          filename: 'uploads/new_workbook.xlsx',
-          timestamp: new Date().toLocaleString('en-US', {
-            month:'short', day:'numeric', year:'numeric',
-            hour:'numeric', minute:'2-digit', hour12:true,
-          }),
-          rowCount: data.lineItems ? data.lineItems.length : 0,
-          vendorCount: data.vendors ? data.vendors.length : 0,
-        };
         console.log('[boot] Loaded uploads/new_workbook.xlsx (cache-busted, fresh fetch)');
       }
     } catch(e) {
@@ -278,7 +270,7 @@ function App({ data: initialData }) {
 
     // ── 3. Last resort: static data/financials.json
     if (!data) {
-      const resp = await fetch((window.__resources && window.__resources.financialsJson) || 'data/financials.json', { cache: 'no-store' });
+      const resp = await fetch((window.__resources && window.__resources.financialsJson) || 'data/financials.json');
       data = await resp.json();
       data._bootSource = 'json';
       console.warn('[boot] Using static financials.json fallback — xlsx and localStorage both unavailable');
