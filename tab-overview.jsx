@@ -1047,4 +1047,4 @@ function buildVarData(lineItems) {
     .filter(c => c.vendors.length > 0);
 }
 
-Object.assign(window, { OverviewTab, buildVarData });
+Object.assign(window, { OverviewTab, buildVarData, OvFilterDrop });

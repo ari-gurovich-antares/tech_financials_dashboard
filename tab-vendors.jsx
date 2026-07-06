@@ -1,6 +1,12 @@
 // Vendors tab — executive overview redesign
 const { useState: useStateV, useMemo: useMemoV, useRef: useRefV } = React;
 
+const VD_CATS = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'Amortization', 'FPC'];
+function vdCat(li) {
+  if ((li.category || '').toLowerCase() === 'amortization') return 'Amortization';
+  return li.subCategory || '(Other)';
+}
+
 // Names that are not real vendors — exclude from rankings & matrix
 const NON_VENDOR_PATTERNS = [
   /^amortization/i, /^multiple$/i, /^amortization\/multiple$/i,
@@ -558,9 +564,50 @@ function VendorsTab({ data }) {
   const [sunburstZoomed, setSunburstZoomed] = useStateV(null);
   const [search,         setSearch]         = useStateV('');
   const [showAll,        setShowAll]        = useStateV(false);
+  const [flt, setFlt]    = useStateV({ domains: [], owners: [], cats: [] });
   const detailRef = useRefV(null);
 
-  const vendors = useMemoV(() => data.vendors || [], [data.vendors]);
+  const allItems = data.lineItems || [];
+  const lookups  = data.lookups   || {};
+
+  const domainOpts = useMemoV(() => {
+    if (lookups.domains?.length) return lookups.domains.filter(Boolean).sort();
+    return [...new Set(allItems.map(li => li.domain).filter(Boolean))].sort();
+  }, [allItems, lookups]);
+
+  const ownerOpts = useMemoV(() => {
+    if (lookups.owners?.length) return lookups.owners.filter(x => x && x !== 'N/A').sort();
+    return [...new Set(allItems.map(li => li.owner).filter(x => x && x !== 'N/A'))].sort();
+  }, [allItems, lookups]);
+
+  const filterActive = flt.domains.length + flt.owners.length + flt.cats.length > 0;
+  const clearFilters = () => setFlt({ domains: [], owners: [], cats: [] });
+
+  const allVendors = useMemoV(() => data.vendors || [], [data.vendors]);
+
+  const vendors = useMemoV(() => {
+    if (!filterActive) return allVendors;
+    return allVendors
+      .map(v => {
+        const filteredItems = (v.lineItems || []).filter(li => {
+          if (flt.domains.length && !flt.domains.includes(li.domain)) return false;
+          if (flt.owners.length  && !flt.owners.includes(li.owner))   return false;
+          if (flt.cats.length    && !flt.cats.includes(vdCat(li)))     return false;
+          return true;
+        });
+        if (!filteredItems.length) return null;
+        const budget   = filteredItems.reduce((s, li) => s + (li.budget   || 0), 0);
+        const forecast = filteredItems.reduce((s, li) => s + (li.forecast || 0), 0);
+        const actual   = filteredItems.reduce((s, li) => s + ((li.monthlyAC || []).reduce((a, x) => a + x, 0)), 0);
+        const risk     = filteredItems.reduce((s, li) => s + (li.risk || 0), 0);
+        const opp      = filteredItems.reduce((s, li) => s + (li.opp  || 0), 0);
+        const net      = filteredItems.reduce((s, li) => s + (li.net  || 0), 0);
+        const domains  = [...new Set(filteredItems.map(li => li.domain).filter(Boolean))];
+        return { ...v, budget, forecast, actual, risk, opp, net, lineItems: filteredItems, domains };
+      })
+      .filter(Boolean);
+  }, [allVendors, flt, filterActive]);
+
   // Real vendors only (for KPIs and charts)
   const realVendors = useMemoV(() => vendors.filter(v => isRealVendor(v.vendor)), [vendors]);
 
@@ -571,7 +618,7 @@ function VendorsTab({ data }) {
       .filter(v => v.vendor.toLowerCase().includes(q))
       .sort((a, b) => a.vendor.localeCompare(b.vendor, undefined, { sensitivity: 'base' }))
       .slice(0, 8);
-  }, [vendors, search]);
+  }, [realVendors, search]);
 
   function handleSelect(v) {
     if (selected?.vendor === v.vendor) {
@@ -589,8 +636,49 @@ function VendorsTab({ data }) {
     }, 50);
   }
 
+  const OvFD = window.OvFilterDrop;
+
   return (
     <div>
+      {/* ══ FILTER BAR ═══════════════════════════════════════════════════ */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        marginBottom: 16, flexWrap: 'wrap',
+        justifyContent: 'center',
+      }}>
+        <span style={{
+          fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 800, fontSize: 10,
+          letterSpacing: '0.22em', textTransform: 'lowercase',
+          color: '#807E7A', marginRight: 4,
+        }}>filter</span>
+        <OvFD
+          label="Domain" options={domainOpts}
+          value={flt.domains} onChange={v => setFlt({ ...flt, domains: v })}
+        />
+        <OvFD
+          label="Domain Owner" options={ownerOpts}
+          value={flt.owners} onChange={v => setFlt({ ...flt, owners: v })}
+        />
+        <OvFD
+          label="Category" options={VD_CATS}
+          value={flt.cats} onChange={v => setFlt({ ...flt, cats: v })}
+        />
+        {filterActive && (
+          <>
+            <button
+              onClick={clearFilters}
+              style={{
+                padding: '6px 12px', background: 'none',
+                border: '1px solid #ECEAE7', cursor: 'pointer',
+                fontFamily: "'Inter', Arial, sans-serif", fontSize: 12, color: '#807E7A',
+              }}>\u2715 Clear all</button>
+            <span style={{ fontSize: 11, color: '#807E7A', fontStyle: 'italic', fontFamily: "'Inter', Arial, sans-serif" }}>
+              Filtered view \u00b7 {realVendors.length} of {allVendors.filter(v => isRealVendor(v.vendor)).length} vendors
+            </span>
+          </>
+        )}
+      </div>
+
       {/* Section 1 — KPIs */}
       <VendorKPIs vendors={realVendors} />
 
