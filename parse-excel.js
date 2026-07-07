@@ -44,6 +44,15 @@
   };
   const str = (v) => v === null || v === undefined ? '' : String(v).trim();
 
+  // Returns true when a worksheet cell contains an Excel error (#REF!, #VALUE!,
+  // #N/A, #DIV/0!, etc.).  We must never use error values as financial numbers.
+  function _isErrCell(cell) {
+    if (!cell) return false;
+    if (cell.t === 'e') return true;                         // SheetJS error type
+    const s = String(cell.v == null ? '' : cell.v);
+    return /^#(REF!|VALUE!|NAME\?|NUM!|DIV\/0!|N\/A|NULL!)/.test(s);
+  }
+
   function findHeaderRow(rows) {
     for (let r = 0; r < Math.min(rows.length, 5); r++) {
       const row = rows[r] || [];
@@ -203,10 +212,25 @@
         const budCellAddr = XLSX.utils.encode_cell({ r: ps, c: colIdx['2026 Final Budget'] });
         const budCell     = ws[budCellAddr];
         if (budCell && budCell.f) {
-          // Match the end of a range reference like ":V140)" or ":AB140,"
-          const rangeMatch = budCell.f.match(/:[A-Z]+(\d+)\s*[),]/);
-          if (rangeMatch) {
-            subtotalRangeEnd = parseInt(rangeMatch[1], 10);
+          // Detect SUBTOTAL(9,...) — function_num 9 excludes rows hidden by filter.
+          // If the workbook was saved with an AutoFilter active the cached value
+          // reflects only the VISIBLE rows, NOT the grand total.  We detect this
+          // by checking for the SUBTOTAL keyword; when found we skip the cached
+          // value as the authoritative KPI source and rely on the lineItems sum.
+          const isFilteredSubtotal = /^\s*SUBTOTAL\s*\(\s*(9|109)\s*,/i.test(budCell.f);
+          if (isFilteredSubtotal) {
+            console.warn('[parse] SUBTOTAL(9/109,...) detected at R' + (ps+1) +
+              ' — workbook likely saved with AutoFilter active.' +
+              ' Cached value ($' + Math.round(workbookSubtotal.budget/1000) + 'K) reflects filtered rows only.' +
+              ' Falling back to lineItems aggregation for all KPI cards.' +
+              ' To fix: open workbook → Data → Refresh All → save → re-upload.');
+            workbookSubtotal = null; // will be replaced by lineItems sum below
+          } else {
+            // Match the end of a range reference like ":V140)" or ":AB140,"
+            const rangeMatch = budCell.f.match(/:[A-Z]+(\d+)\s*[),]/);
+            if (rangeMatch) {
+              subtotalRangeEnd = parseInt(rangeMatch[1], 10);
+            }
           }
         }
 
@@ -216,6 +240,7 @@
 
     // ── STEP 2: Fallback — derive range end via budget-sum matching ──────
     // Used when the XLSX file stores only computed values, not formula strings.
+    // Skip if a filtered SUBTOTAL was already detected (workbookSubtotal = null).
     if (!subtotalRangeEnd && workbookSubtotal) {
       const targetBudget = workbookSubtotal.budget; // = SUM of all rows in SUBTOTAL range
       let cumBudget = 0;
@@ -236,6 +261,32 @@
       }
     }
 
+    // ── Formula-derived field detection (pre-STEP 3) ────────────────────────
+    // Sample up to 8 data rows to determine whether Risk, Opp, Net are formula-
+    // derived from Budget and Forecast.  When a cell carries a formula, the
+    // parser re-derives its value in JS instead of trusting the cached result.
+    // This avoids stale values when the workbook was saved with manual calc mode.
+    //
+    // Standard derivation (confirmed from workbook IF formulas):
+    //   net         = forecast − budget
+    //   risk        = net > 0 ? net : 0    (unfavorable overspend)
+    //   opportunity = net < 0 ? net : 0    (favorable underspend)
+    const _riskCI = colIdx['2026 Risk'];
+    const _oppCI  = colIdx['2026 Opportunity'];
+    const _netCI  = colIdx['2026 Net Position'];
+    let _riskFml = false, _oppFml = false, _netFml = false, _fmlSampled = 0;
+    for (let _sr = headerRowIdx + 1; _sr < rows.length && _fmlSampled < 8; _sr++) {
+      const _srow = rows[_sr];
+      if (!_srow || _srow.every(v => v === null || v === '' || v === undefined)) continue;
+      if (Math.abs(num(_srow[colIdx['2026 Final Budget']])) < 100) continue;
+      if (_riskCI != null && !_riskFml) { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _riskCI })]; if (_c && _c.f) _riskFml = true; }
+      if (_oppCI  != null && !_oppFml)  { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _oppCI  })]; if (_c && _c.f) _oppFml  = true; }
+      if (_netCI  != null && !_netFml)  { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _netCI  })]; if (_c && _c.f) _netFml  = true; }
+      _fmlSampled++;
+    }
+    console.log('[parse] Risk/Opp/Net formula detection (' + _fmlSampled + ' rows sampled):',
+      { riskFormula: _riskFml, oppFormula: _oppFml, netFormula: _netFml });
+
     // ── STEP 3: Main data loop — process only rows within the SUBTOTAL range ─
     const lineItems = [];
     let rowCount = 0;
@@ -246,6 +297,10 @@
     // SUBTOTAL formula — regardless of which field or rule triggered the exclusion.
     // NOTE: the SUBTOTAL row itself (subtotalRowIdx) is always skipped.
     let exclBudget = 0, exclForecast = 0, exclActual = 0, exclRisk = 0, exclOpp = 0, exclNet = 0;
+    // ── Error / recompute tracking ───────────────────────────────────────
+    let _errCellCount = 0;          // cells that contained an Excel error value
+    let _netRecompCount = 0;        // rows where Net was recomputed from FC−Bud
+    const _netRecompSample = [];    // up to 5 sample rows for console logging
     const capRowLog = []; // diagnostic: rows excluded as Capitalization
     for (let r = headerRowIdx + 1; r < rows.length; r++) {
 
@@ -307,6 +362,45 @@
         continue;
       }
 
+      // ── Error-safe risk/opp/net ───────────────────────────────────────────
+      // Recompute when a cell: (a) is an Excel error, OR
+      //                        (b) is formula-driven (per column-level detection)
+      //                            AND carries a formula on this specific cell.
+      // Hardcoded plain-number overrides are always preserved.
+      const _liBud = num(rec.budget);
+      const _liFc  = num(rec.forecast);
+      const _liN   = _liFc - _liBud;
+
+      const _rCell = _riskCI != null ? ws[XLSX.utils.encode_cell({ r, c: _riskCI })] : null;
+      const _oCell = _oppCI  != null ? ws[XLSX.utils.encode_cell({ r, c: _oppCI  })] : null;
+      const _nCell = _netCI  != null ? ws[XLSX.utils.encode_cell({ r, c: _netCI  })] : null;
+
+      if (_isErrCell(_rCell)) _errCellCount++;
+      if (_isErrCell(_oCell)) _errCellCount++;
+      if (_isErrCell(_nCell)) _errCellCount++;
+
+      const _recompRisk = _isErrCell(_rCell) || (_riskFml && _rCell && _rCell.f);
+      const _recompOpp  = _isErrCell(_oCell) || (_oppFml  && _oCell && _oCell.f);
+      const _recompNet  = _isErrCell(_nCell) || (_netFml  && _nCell && _nCell.f);
+
+      let _liRisk = _recompRisk ? (_liN > 0 ? _liN : 0) : num(rec.risk);
+      let _liOpp  = _recompOpp  ? (_liN < 0 ? _liN : 0) : num(rec.opp);
+      let _liNet  = _recompNet  ? _liN                  : num(rec.net);
+
+      if (_recompNet) {
+        _netRecompCount++;
+        if (_netRecompSample.length < 5) {
+          _netRecompSample.push({
+            row: r + 1,
+            vendor: str(rec.vendor) || '(unknown)',
+            budget: _liBud, forecast: _liFc,
+            storedNet: _nCell ? _nCell.v : null,
+            netErr: _isErrCell(_nCell),
+            computedNet: _liN,
+          });
+        }
+      }
+
       const lineItem = {
         vendor: str(rec.vendor) || '',
         domain: str(rec.domain) || '',
@@ -316,12 +410,12 @@
         application: str(rec.application) || '',
         subCategory: str(rec.subCategory) || '',
         treatment: str(rec.treatment) || '',
-        budget: num(rec.budget),
+        budget: _liBud,
         actual: num(rec.actual),
-        forecast: num(rec.forecast),
-        risk: num(rec.risk),
-        opp: num(rec.opp),
-        net: num(rec.net),
+        forecast: _liFc,
+        risk: _liRisk,
+        opp: _liOpp,
+        net: _liNet,
         notes: str(rec.notes) || '',
         monthlyAC: readArr(row, colIdx, MONTHS_AC),
         monthlyFC: readArr(row, colIdx, MONTHS_FC),
@@ -332,6 +426,30 @@
       };
       lineItems.push(lineItem);
       rowCount++;
+    }
+
+    // ── Error / recompute summary ─────────────────────────────────────────
+    console.log('[parse] Excel error cells found in Risk/Opp/Net columns: ' + _errCellCount);
+    console.log('[parse] Rows where Net was recomputed from Forecast−Budget: ' + _netRecompCount);
+    if (_netRecompSample.length) {
+      console.log('[parse] Net recompute sample rows:', _netRecompSample.map(s =>
+        'R' + s.row + ' ' + s.vendor.slice(0,24) +
+        ' | bud=$' + Math.round(s.budget/1000) + 'K fc=$' + Math.round(s.forecast/1000) + 'K' +
+        ' | stored=' + (s.netErr ? '#ERR' : '$'+Math.round((s.storedNet||0)/1000)+'K') +
+        ' → computed=$' + Math.round(s.computedNet/1000) + 'K'
+      ));
+    }
+
+    // ── When filtered SUBTOTAL was detected (workbookSubtotal=null), build from lineItems ──
+    // Mark as lineItems-sourced so the cap-exclusion block below can skip it
+    // (lineItems already exclude Capitalization rows — no double-subtraction).
+    let _wbsFromLineItems = false;
+    if (!workbookSubtotal && lineItems.length) {
+      let _lb=0,_lf=0,_la=0,_lr=0,_lo=0,_ln=0;
+      for (const li of lineItems) { _lb+=li.budget||0; _lf+=li.forecast||0; _la+=li.actual||0; _lr+=li.risk||0; _lo+=li.opp||0; _ln+=li.net||0; }
+      workbookSubtotal = { budget:_lb, forecast:_lf, actual:_la, remaining:_lf-_la, risk:_lr, opp:_lo, net:_ln, absOpp:Math.abs(_lo) };
+      _wbsFromLineItems = true;
+      console.log('[parse] KPI from lineItems (filtered-SUBTOTAL path): budget=$'+Math.round(_lb/1e3)+'K forecast=$'+Math.round(_lf/1e3)+'K risk=$'+Math.round(_lr/1e3)+'K');
     }
 
     // ── Adjust workbookSubtotal to exclude Capitalization rows ─────────────
@@ -414,7 +532,146 @@
         net:      Math.abs(_ws.net      - _s.net)      < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.net      - _s.net).toFixed(2),
       });
     }
+    // ── Attach YTD Financials Run Rate data (authoritative KPI / chart source) ──
+    //
+    // SOURCE-OF-TRUTH SPLIT:
+    //   • YTD Financials Run Rate sheet → top KPI cards + Risk×Opp by Category chart.
+    //     This matches the control view users reconcile against in the workbook.
+    //   • Master Data lineItems → Back Pocket, vendor detail, project detail,
+    //     drilldowns, filter views.  All row-level data comes from here.
+    const _ytd = (() => {
+      try { return parseYTDSheet(wb); }
+      catch(e) { console.warn('[parse] YTD sheet parse failed:', e.message); return null; }
+    })();
+    if (_ytd) {
+      _result.ytdSummary    = _ytd.ytdSummary;
+      _result.ytdCategories = _ytd.ytdCategories;
+
+      // ── Console reconciliation check (non-visible) ───────────────────────
+      // Compares YTD Financials Run Rate Grand Total against Master Data
+      // lineItems aggregation.  Any diff > $1 K is flagged so analysts can
+      // detect stale pivots or parser row-scope mismatches immediately.
+      const _ys  = _ytd.ytdSummary;
+      const _md  = _result.summary;          // lineItems sum
+      const _diffs = {
+        budget:    Math.round(_md.budget   - _ys.budget),
+        forecast:  Math.round(_md.forecast - _ys.forecast),
+        risk:      Math.round(_md.risk     - _ys.risk),
+        opp:       Math.round(_md.opp      - _ys.opp),    // both signed
+        net:       Math.round(_md.net      - _ys.net),
+      };
+      const _anyDiff = Object.values(_diffs).some(d => Math.abs(d) > 1000);
+      if (_anyDiff) {
+        const _budMatch = Math.abs(_diffs.budget) <= 1000;
+        const _cause = _budMatch
+          ? 'Budget totals match but financial fields differ — rows were updated in Master Data after the YTD pivot was last refreshed (stale pivot cache).  Fix: open workbook, Data → Refresh All, save, re-upload.'
+          : 'Budget totals also differ — parser row scope may differ from the YTD pivot (different rows included/excluded).  Check subtotal range or filter state.';
+        console.warn('[reconcile] ⚠️  YTD Financials Run Rate and Master Data aggregation do not reconcile.\n' + _cause);
+        console.warn('[reconcile] Differences (Master Data − YTD), positive = MD higher:',
+          Object.fromEntries(
+            Object.entries(_diffs).map(([k, v]) => [k, '$' + (v/1000).toFixed(1) + 'K'])
+          )
+        );
+      } else {
+        console.log('[reconcile] ✅ YTD Financials Run Rate and Master Data reconcile within $1K.');
+      }
+    }
     return _result;
+  }
+
+  // ── Parse YTD Financials Run Rate sheet ────────────────────────────────────
+  // Returns { ytdSummary, ytdCategories } or null on failure.
+  // ytdSummary  → headline KPI cards when no filter is active
+  // ytdCategories → Risk × Opp by Category chart, so bars match the KPIs
+  function parseYTDSheet(wb_) {
+    const ytdSheet = wb_.SheetNames.find(n => /ytd|run.?rate/i.test(n));
+    if (!ytdSheet) {
+      console.warn('[parse] YTD Financials Run Rate sheet not found — KPIs from Master Data');
+      return null;
+    }
+    const ws2  = wb_.Sheets[ytdSheet];
+    const rows = XLSX.utils.sheet_to_json(ws2, { header:1, defval:null, raw:true });
+
+    // Find column header row — row that has BOTH "Budget" and "Risk" in cells
+    let hdrIdx=-1, cBud=-1, cFc=-1, cRisk=-1, cOpp=-1, cNet=-1;
+    for (let r = 0; r < Math.min(rows.length, 8); r++) {
+      const row = rows[r] || [];
+      const hasBud  = row.some(v => /budget/i.test(str(v)));
+      const hasRisk = row.some(v => /risk/i.test(str(v)) && !/net/i.test(str(v)));
+      if (!hasBud || !hasRisk) continue;
+      hdrIdx = r;
+      row.forEach((v, i) => {
+        const s = str(v).toLowerCase();
+        if (s.includes('budget'))                                              cBud  = i;
+        if ((s.includes('actuals') || s.includes('forecast')) &&
+            !s.includes('budget'))                                             cFc   = i;
+        if (s.includes('risk') && !s.includes('net'))                         cRisk = i;
+        if (s.includes('opportun'))                                            cOpp  = i;
+        if (s.includes('net') && (s.includes('pos') || s.includes('ition')))  cNet  = i;
+      });
+      break;
+    }
+    if (hdrIdx < 0 || cBud < 0) {
+      console.warn('[parse] YTD sheet: column header not found');
+      return null;
+    }
+    if (cFc < 0) cFc = cBud + 1; // fallback: forecast column follows budget
+    console.log('[parse] YTD "' + ytdSheet + '" hdr=' + hdrIdx +
+      ' bud=' + cBud + ' fc=' + cFc + ' risk=' + cRisk + ' opp=' + cOpp + ' net=' + cNet);
+
+    const SKIP_RE = /transaction.?type|sub.?categ|row.?label|\(multiple|\(blank\)|domain.?owner|sum.?of/i;
+    const categories = [];
+    let   grandTotal = null;
+
+    for (let r = hdrIdx + 1; r < Math.min(rows.length, hdrIdx + 30); r++) {
+      const row = rows[r] || [];
+      if (row.every(v => v === null || v === '')) continue;
+
+      // Label = first non-numeric string in columns 0 → cBud-1
+      let label = '';
+      for (let c = 0; c < Math.max(1, cBud); c++) {
+        const v = str(row[c]);
+        if (v && !/^\d/.test(v)) { label = v; break; }
+      }
+      if (!label || SKIP_RE.test(label)) continue;
+
+      const budget   = num(row[cBud]);
+      const forecast = cFc   >= 0 ? num(row[cFc])   : 0;
+      const risk     = cRisk >= 0 ? num(row[cRisk])  : 0;
+      const opp      = cOpp  >= 0 ? num(row[cOpp])   : 0;
+      const net      = cNet  >= 0 ? num(row[cNet])   : (risk + opp);
+
+      if (/grand\s*total/i.test(label)) {
+        grandTotal = { budget, forecast, risk, opp, net };
+        break;
+      }
+      if (budget !== 0 || forecast !== 0) {
+        categories.push({ category: label, budget, forecast, risk, opp, net });
+      }
+    }
+
+    if (!grandTotal) {
+      console.warn('[parse] YTD sheet: Grand Total row not found — KPIs from Master Data');
+      return null;
+    }
+    console.log('[parse] YTD Grand Total: budget=$' + Math.round(grandTotal.budget/1000) + 'K' +
+      ' fc=$' + Math.round(grandTotal.forecast/1000) + 'K' +
+      ' risk=$' + Math.round(grandTotal.risk/1000) + 'K' +
+      ' opp=$' + Math.round(grandTotal.opp/1000) + 'K' +
+      ' net=$' + Math.round(grandTotal.net/1000) + 'K');
+    console.log('[parse] YTD categories:', categories.map(c => c.category).join(', '));
+
+    return {
+      ytdSummary: {
+        budget:   grandTotal.budget,
+        forecast: grandTotal.forecast,
+        risk:     grandTotal.risk,
+        opp:      grandTotal.opp,     // negative = favorable in workbook
+        absOpp:   Math.abs(grandTotal.opp),
+        net:      grandTotal.net,
+      },
+      ytdCategories: categories,
+    };
   }
 
   function uniq(arr) { return [...new Set(arr.filter(x => x !== '' && x != null))].sort(); }

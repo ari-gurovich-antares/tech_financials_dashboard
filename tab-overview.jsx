@@ -16,11 +16,12 @@ const OV = {
   sans:   "'Inter', Arial, sans-serif",
 };
 
-const OV_CATS = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'Amortization', 'FPC'];
+const OV_CATS = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'FPC'];
 
+// Group by Sub-Category1 — this matches the YTD Financials Run Rate pivot grouping.
+// All rows (including Amortization TX type) are grouped by their Sub-Category1 value.
 function ovCat(li) {
-  if ((li.category || '').toLowerCase() === 'amortization') return 'Amortization';
-  return li.subCategory || '(Other)';
+  return li.subCategory || li.category || '(Other)';
 }
 
 // ── OvEyebrow ─────────────────────────────────────────────────────────────
@@ -335,6 +336,10 @@ function OverviewTab({ data }) {
   // When no filters active: use workbook SUBTOTAL values directly (exact match to source).
   // When filters active: derive from filtered line items.
   const kpi = useMemoOV(() => {
+    // Source: cleaned Master Data lineItems (workbookSubtotal = lineItems sum,
+    // Capitalization excluded, formula-derived/error cells recomputed from
+    // Budget and Forecast in JS).  YTD Financials Run Rate is used only as a
+    // reconciliation control check — it does NOT drive visible KPI values.
     if (!filterActive && data.workbookSubtotal) {
       const ws = data.workbookSubtotal;
       return {
@@ -360,30 +365,27 @@ function OverviewTab({ data }) {
     return { budget: b, forecast: f, actual: a, remaining: f - a, risk: r, opp: Math.abs(o), net: n };
   }, [items, filterActive, data.workbookSubtotal]);
 
-  // Back Pocket: computed from full workbook lineItems (not filtered).
+  // Back Pocket: computed from FILTERED lineItems so it respects active filter chips.
   // = |Σ net| where Non-Committed flag = Y / Yes / True / 1 (case-insensitive).
   // Falls back to data.summary.backPocket if lineItems lack the nonCommitted field
   // (e.g. pre-fix localStorage data restored at boot).
   const backPocket = useMemoOV(() => {
-    const src = data.lineItems || [];
+    const src = items; // uses filtered set — changes with domain/owner/category filters
     const isFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
     const flagged = src.filter(li => isFlag(li.nonCommitted));
     const sum     = flagged.reduce((s, li) => s + (li.net || 0), 0);
-    console.log('[overview] backPocket lineItems count', src.length);
-    console.log('[overview] backPocket flagged count',   flagged.length);
-    console.log('[overview] backPocket raw sum',         sum);
-    console.log('[overview] backPocket display',         Math.abs(sum));
-    // If no rows flagged but summary carries a pre-computed value, use it as fallback
-    if (flagged.length === 0 && data.summary && data.summary.backPocket > 0) {
-      console.log('[overview] backPocket using summary.backPocket fallback', data.summary.backPocket);
+    // Fallback only when no filters are active (legacy localStorage data lacking
+    // the nonCommitted field).  When a filter is active and excludes all Non-Committed
+    // rows, return $0 — do NOT fall back to the static parsed value.
+    if (flagged.length === 0 && !filterActive && data.summary && data.summary.backPocket > 0) {
       return data.summary.backPocket;
     }
     return Math.abs(sum);
-  }, [data.lineItems, data.summary]);
+  }, [items, filterActive, data.summary]);
 
   // ── Category aggregation — gross Risk and Opportunity per category ──────
-  // risk = sum of 2026 Risk; opp = abs(sum of 2026 Opportunity).
-  // Red bars (risk) sum to kpi.risk; green bars (opp) sum to kpi.opp.
+  // Source: cleaned Master Data lineItems (same source as KPI cards).
+  // Risk bars (red) sum to kpi.risk; Opp bars (green) sum to kpi.opp.
   const cats = useMemoOV(() => {
     const agg = {};
     for (const li of items) {
@@ -564,21 +566,26 @@ function OverviewTab({ data }) {
 
       {/* ══ ROW 1 — 4 PRIMARY KPIs ══════════════════════════════════════ */}
       <style>{`
-        .kpi-flip { position: relative; perspective: 800px; }
-        .kpi-flip-inner {
-          position: relative; width: 100%; height: 100%;
-          transform-style: preserve-3d;
-          transition: transform 0.5s cubic-bezier(0.4,0.2,0.2,1);
-        }
-        .kpi-flip:hover .kpi-flip-inner { transform: rotateY(180deg); }
-        .kpi-flip-front, .kpi-flip-back {
+        .kpi-flip { position: relative; cursor: default; }
+        .kpi-flip-inner { position: relative; width: 100%; height: 100%; }
+        .kpi-flip-front {
           position: absolute; inset: 0;
           display: flex; flex-direction: column;
           align-items: center; justify-content: center;
           padding: 28px; text-align: center;
-          backface-visibility: hidden; -webkit-backface-visibility: hidden;
+          transition: opacity 0.25s;
         }
-        .kpi-flip-back { background: #333C66; transform: rotateY(180deg); }
+        .kpi-flip-back {
+          position: absolute; inset: 0;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          padding: 28px; text-align: center;
+          background: #333C66;
+          opacity: 0;
+          transition: opacity 0.25s;
+        }
+        .kpi-flip:hover .kpi-flip-back  { opacity: 1; }
+        .kpi-flip:hover .kpi-flip-front { opacity: 0; }
       `}</style>
       <div style={{ ...CARD, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', overflow: 'hidden', maxWidth: 1050, margin: '0 auto 20px' }}>
         {[
