@@ -65,6 +65,30 @@ function MultiSelect({ label, options, selected, onChange, allLabel }) {
   );
 }
 
+const CATEGORY_ORDER = [
+  'Labor/T&M',
+  'Managed Service',
+  'Managed Service(MS)',
+  'Fixed Price Contract',
+  'Fixed Price Contract(FPC)',
+  'Software',
+  'Hardware',
+  'Infrastructure',
+  'Other Operating Expense',
+  'Other Operating Expense(OOE)',
+];
+function sortCategories(cats) {
+  if (!cats) return cats;
+  return [...cats].sort((a, b) => {
+    const ai = CATEGORY_ORDER.findIndex(o => a && a.toLowerCase().startsWith(o.toLowerCase()));
+    const bi = CATEGORY_ORDER.findIndex(o => b && b.toLowerCase().startsWith(o.toLowerCase()));
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+}
+
 function FilterBar({ filters, setFilters, lookups }) {
   function update(k, v) { setFilters({ ...filters, [k]: v }); }
   return (
@@ -96,7 +120,7 @@ function FilterBar({ filters, setFilters, lookups }) {
         <span className="fb-lbl">domain</span>
         <MultiSelect label="Domain" options={lookups.domains} selected={filters.domains} onChange={(v)=>update('domains', v)} allLabel="All" />
         <span className="fb-lbl">category</span>
-        <MultiSelect label="Category" options={lookups.categories} selected={filters.categories} onChange={(v)=>update('categories', v)} allLabel="All" />
+        <MultiSelect label="Category" options={sortCategories(lookups.categories)} selected={filters.categories} onChange={(v)=>update('categories', v)} allLabel="All" />
         <span className="fb-lbl">onestream cat.</span>
         <MultiSelect label="OneStream Category" options={lookups.onestreamCategories || []} selected={filters.onestreamCategories} onChange={(v)=>update('onestreamCategories', v)} allLabel="All" />
         <span className="fb-lbl">sub-category1</span>

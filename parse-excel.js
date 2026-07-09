@@ -441,14 +441,10 @@
     }
 
     // ── When filtered SUBTOTAL was detected (workbookSubtotal=null), build from lineItems ──
-    // Mark as lineItems-sourced so the cap-exclusion block below can skip it
-    // (lineItems already exclude Capitalization rows — no double-subtraction).
-    let _wbsFromLineItems = false;
     if (!workbookSubtotal && lineItems.length) {
       let _lb=0,_lf=0,_la=0,_lr=0,_lo=0,_ln=0;
       for (const li of lineItems) { _lb+=li.budget||0; _lf+=li.forecast||0; _la+=li.actual||0; _lr+=li.risk||0; _lo+=li.opp||0; _ln+=li.net||0; }
       workbookSubtotal = { budget:_lb, forecast:_lf, actual:_la, remaining:_lf-_la, risk:_lr, opp:_lo, net:_ln, absOpp:Math.abs(_lo) };
-      _wbsFromLineItems = true;
       console.log('[parse] KPI from lineItems (filtered-SUBTOTAL path): budget=$'+Math.round(_lb/1e3)+'K forecast=$'+Math.round(_lf/1e3)+'K risk=$'+Math.round(_lr/1e3)+'K');
     }
 

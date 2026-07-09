@@ -336,10 +336,21 @@ function OverviewTab({ data }) {
   // When no filters active: use workbook SUBTOTAL values directly (exact match to source).
   // When filters active: derive from filtered line items.
   const kpi = useMemoOV(() => {
-    // Source: cleaned Master Data lineItems (workbookSubtotal = lineItems sum,
-    // Capitalization excluded, formula-derived/error cells recomputed from
-    // Budget and Forecast in JS).  YTD Financials Run Rate is used only as a
-    // reconciliation control check — it does NOT drive visible KPI values.
+    // Priority 1: YTD Financials Run Rate Grand Total—matches the user-visible reconciliation page
+    if (!filterActive && data.ytdSummary) {
+      const ys     = data.ytdSummary;
+      const actual = data.workbookSubtotal?.actual ?? data.summary?.actual ?? 0;
+      return {
+        budget:    ys.budget,
+        forecast:  ys.forecast,
+        actual,
+        remaining: ys.forecast - actual,
+        risk:      ys.risk,
+        opp:       ys.absOpp,
+        net:       ys.net,
+      };
+    }
+    // Priority 2: workbookSubtotal (lineItems sum after filtered-SUBTOTAL fallback)
     if (!filterActive && data.workbookSubtotal) {
       const ws = data.workbookSubtotal;
       return {
@@ -363,30 +374,52 @@ function OverviewTab({ data }) {
       n += li.net      || 0;
     }
     return { budget: b, forecast: f, actual: a, remaining: f - a, risk: r, opp: Math.abs(o), net: n };
-  }, [items, filterActive, data.workbookSubtotal]);
+  }, [items, filterActive, data.workbookSubtotal, data.ytdSummary]);
 
-  // Back Pocket: computed from FILTERED lineItems so it respects active filter chips.
+  // Back Pocket: computed from full workbook lineItems (not filtered).
   // = |Σ net| where Non-Committed flag = Y / Yes / True / 1 (case-insensitive).
   // Falls back to data.summary.backPocket if lineItems lack the nonCommitted field
   // (e.g. pre-fix localStorage data restored at boot).
   const backPocket = useMemoOV(() => {
-    const src = items; // uses filtered set — changes with domain/owner/category filters
+    const src = data.lineItems || [];
     const isFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
     const flagged = src.filter(li => isFlag(li.nonCommitted));
     const sum     = flagged.reduce((s, li) => s + (li.net || 0), 0);
-    // Fallback only when no filters are active (legacy localStorage data lacking
-    // the nonCommitted field).  When a filter is active and excludes all Non-Committed
-    // rows, return $0 — do NOT fall back to the static parsed value.
-    if (flagged.length === 0 && !filterActive && data.summary && data.summary.backPocket > 0) {
+    console.log('[overview] backPocket lineItems count', src.length);
+    console.log('[overview] backPocket flagged count',   flagged.length);
+    console.log('[overview] backPocket raw sum',         sum);
+    console.log('[overview] backPocket display',         Math.abs(sum));
+    // If no rows flagged but summary carries a pre-computed value, use it as fallback
+    if (flagged.length === 0 && data.summary && data.summary.backPocket > 0) {
+      console.log('[overview] backPocket using summary.backPocket fallback', data.summary.backPocket);
       return data.summary.backPocket;
     }
     return Math.abs(sum);
-  }, [items, filterActive, data.summary]);
+  }, [data.lineItems, data.summary]);
 
   // ── Category aggregation — gross Risk and Opportunity per category ──────
-  // Source: cleaned Master Data lineItems (same source as KPI cards).
-  // Risk bars (red) sum to kpi.risk; Opp bars (green) sum to kpi.opp.
+  // Priority: YTD category rows (consistent with KPI cards).
+  // Fallback: Master Data lineItems aggregation when filtered or YTD unavailable.
+  // Risk bars (red) = positive values from risk column (unfavorable exposure).
+  // Opp bars (green) = abs of negative opp values (favorable upside).
   const cats = useMemoOV(() => {
+    if (!filterActive && data.ytdCategories?.length) {
+      const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return OV_CATS.map(cat => {
+        const ytd = data.ytdCategories.find(c =>
+          c.category === cat ||
+          norm(c.category).startsWith(norm(cat).slice(0, 4))
+        );
+        if (!ytd) return { cat, risk: 0, opp: 0, v: 0 };
+        return {
+          cat,
+          risk: Math.max(0, Math.round(ytd.risk)),   // positive = unfavorable
+          opp:  Math.max(0, Math.round(-ytd.opp)),   // negative opp → positive bar
+          v:    Math.round(ytd.forecast - ytd.budget),
+        };
+      });
+    }
+    // Filtered or YTD unavailable — aggregate from lineItems
     const agg = {};
     for (const li of items) {
       const c = ovCat(li);
@@ -399,7 +432,7 @@ function OverviewTab({ data }) {
       const d = agg[cat] || { risk: 0, opp: 0, net: 0 };
       return { cat, risk: Math.round(d.risk), opp: Math.round(d.opp), v: Math.round(d.net) };
     });
-  }, [items]);
+  }, [items, filterActive, data.ytdCategories]);
 
   const ovMaxBar   = Math.max(...cats.map(c => Math.max(c.risk, c.opp)), 1);
 
