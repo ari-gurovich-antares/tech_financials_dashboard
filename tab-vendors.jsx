@@ -157,7 +157,16 @@ function VendorDetail({ vendor: v, onClose }) {
   const maxM   = Math.max(...[...(v.monthlyAC||[]),...(v.monthlyFC||[])].map(Math.abs), 1);
 
   const [expandedCat, setExpandedCat] = useStateV(null);
+  const [detailSort, setDetailSort] = useStateV({ col:'actual', dir:'desc' });
   const lineItems = v.lineItems || [];
+
+  function toggleDetailSort(col) {
+    setDetailSort(s => s.col === col ? { col, dir: s.dir==='desc'?'asc':'desc' } : { col, dir:'desc' });
+  }
+  function detailSortArrow(col) {
+    if (detailSort.col !== col) return <span style={{ color:'#9AA3C7', marginLeft:3, fontSize:9 }}>↕</span>;
+    return <span style={{ color:'#333C66', marginLeft:3, fontSize:9 }}>{detailSort.dir === 'desc' ? '↓' : '↑'}</span>;
+  }
 
 
 
@@ -388,35 +397,65 @@ function VendorDetail({ vendor: v, onClose }) {
                     {/* Level 2 – project rows */}
                     {isOpen && (
                       <div style={{ background:'#F6F7FB', borderBottom:'1px solid #EDECEA' }}>
-                        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                        <table style={{ width:'100%', minWidth:1280, borderCollapse:'collapse', fontSize:11 }}>
                           <thead>
                             <tr style={{ background:'#EAECF6' }}>
-                              <th style={{ padding:'7px 16px 7px 32px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Project / Application</th>
-                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Budget</th>
-                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Actuals</th>
-                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Forecast</th>
-                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Net R/(O)</th>
-                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes</th>
+                              <th onClick={() => toggleDetailSort('vendor')} style={{ position:'sticky', left:0, zIndex:2, background:'#EAECF6', padding:'7px 16px 7px 32px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', cursor:'pointer', whiteSpace:'nowrap' }}>Vendor {detailSortArrow('vendor')}</th>
+                              <th style={{ padding:'7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Category</th>
+                              <th onClick={() => toggleDetailSort('budget')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Budget {detailSortArrow('budget')}</th>
+                              <th onClick={() => toggleDetailSort('actual')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Actuals {detailSortArrow('actual')}</th>
+                              <th onClick={() => toggleDetailSort('forecastOnly')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Forecast {detailSortArrow('forecastOnly')}</th>
+                              <th onClick={() => toggleDetailSort('actfc')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Actuals + Forecast {detailSortArrow('actfc')}</th>
+                              <th onClick={() => toggleDetailSort('cons')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Budget Consumption % {detailSortArrow('cons')}</th>
+                              <th onClick={() => toggleDetailSort('risk')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Risk {detailSortArrow('risk')}</th>
+                              <th onClick={() => toggleDetailSort('opp')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Opportunity {detailSortArrow('opp')}</th>
+                              <th onClick={() => toggleDetailSort('net')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Net Risk/Opportunity {detailSortArrow('net')}</th>
+                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes - Risk/Opportunity</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {cg.items.map((li, idx) => {
+                            {[...cg.items].sort((a,b) => {
+                              const val = (li) => {
+                                const ac = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
+                                const fcOnly = Math.max((li.forecast||0) - ac, 0);
+                                const cons = (li.budget||0) > 0 ? (li.forecast||0)/(li.budget||0) : 0;
+                                if (detailSort.col === 'vendor') return (li.vendor||'').toLowerCase();
+                                if (detailSort.col === 'budget') return li.budget||0;
+                                if (detailSort.col === 'actual') return ac;
+                                if (detailSort.col === 'forecastOnly') return fcOnly;
+                                if (detailSort.col === 'actfc') return li.forecast||0;
+                                if (detailSort.col === 'cons') return cons;
+                                if (detailSort.col === 'risk') return li.risk||0;
+                                if (detailSort.col === 'opp') return Math.abs(li.opp||0);
+                                if (detailSort.col === 'net') return li.net||0;
+                                return ac;
+                              };
+                              const av = val(a), bv = val(b), mul = detailSort.dir === 'desc' ? -1 : 1;
+                              if (typeof av === 'string') return mul * av.localeCompare(bv);
+                              return mul * (av - bv);
+                            }).map((li, idx) => {
                               const acLI = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-                              const fcLI = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
+                              const fcOnlyLI = Math.max((li.forecast||0) - acLI, 0);
+                              const consLI = (li.budget||0)>0 ? (li.forecast||0)/(li.budget||0)*100 : null;
                               return (
                                 <tr key={idx} style={{ borderTop:'1px solid #E4E6F2', background: idx%2===0?'#F6F7FB':'#F0F1F8' }}>
-                                  <td style={{ padding:'8px 12px 8px 32px', color:'#1A1F3C' }}>
-                                    <div style={{ fontWeight:500 }}>{li.application || li.project || '—'}</div>
-                                    {li.project && li.application && <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1 }}>{li.project}</div>}
+                                  <td style={{ position:'sticky', left:0, zIndex:1, background: idx%2===0?'#F6F7FB':'#F0F1F8', padding:'8px 12px 8px 32px', color:'#1A1F3C', minWidth:180 }}>
+                                    <div style={{ fontWeight:600 }}>{li.vendor || v.vendor || '—'}</div>
+                                    <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1, maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{li.application || li.project || ''}</div>
                                   </td>
+                                  <td style={{ padding:'8px 12px', color:'#1A1F3C', whiteSpace:'nowrap' }}>{li.subCategory || li.category || '—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:li.budget>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{li.budget>0?fmt.k(li.budget):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:acLI>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{acLI>0?fmt.k(acLI):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(fcLI)}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:fcOnlyLI>0?'#333C66':'#D8D6D2', whiteSpace:'nowrap' }}>{fcOnlyLI>0?fmt.k(fcOnlyLI):'—'}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(li.forecast||0)}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:consLI===null?'#D8D6D2':consLI>100?'#C03A3A':consLI>85?'#96600A':'#333C66', whiteSpace:'nowrap' }}>{consLI===null?'—':`${consLI.toFixed(0)}%`}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:(li.risk||0)>100?'#C03A3A':'#D8D6D2', whiteSpace:'nowrap' }}>{(li.risk||0)>100?fmt.k(li.risk):'—'}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:(li.opp||0)<-100?'#1F7A4D':'#D8D6D2', whiteSpace:'nowrap' }}>{(li.opp||0)<-100?fmt.k(Math.abs(li.opp)):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', fontWeight:Math.abs(li.net||0)>100?600:400, color:(li.net||0)>100?'#C03A3A':(li.net||0)<-100?'#1F7A4D':'#D8D6D2' }}>
                                     {Math.abs(li.net||0)>100?fmt.signed(li.net):'—'}
                                   </td>
-                                  <td style={{ padding:'8px 16px 8px 12px', color:'#807E7A', fontSize:10, lineHeight:1.4, wordBreak:'break-word', maxWidth:200 }}>
-                                    {li.notes || <span style={{ color:'#D8D6D2' }}>—</span>}
+                                  <td style={{ padding:'8px 16px 8px 12px', color:'#807E7A', fontSize:10, lineHeight:1.4, wordBreak:'break-word', minWidth:220 }}>
+                                    {li.notesRO || li.notes || <span style={{ color:'#D8D6D2' }}>—</span>}
                                   </td>
                                 </tr>
                               );
@@ -424,10 +463,15 @@ function VendorDetail({ vendor: v, onClose }) {
                           </tbody>
                           <tfoot>
                             <tr style={{ background:'#EAECF6', borderTop:'2px solid #6699FF30' }}>
-                              <td style={{ padding:'8px 12px 8px 32px', fontWeight:700, color:'#333C66', fontSize:11 }}>Subtotal</td>
+                              <td style={{ position:'sticky', left:0, background:'#EAECF6', padding:'8px 12px 8px 32px', fontWeight:700, color:'#333C66', fontSize:11 }}>Subtotal</td>
+                              <td />
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.budget>0?fmt.k(cg.budget):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.actual>0?fmt.k(cg.actual):'—'}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{Math.max((cg.forecast||0)-(cg.actual||0),0)>0?fmt.k(Math.max((cg.forecast||0)-(cg.actual||0),0)):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast)}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.budget>0 ? ((cg.forecast/cg.budget)>1?'#C03A3A':(cg.forecast/cg.budget)>0.85?'#96600A':'#333C66'):'#D8D6D2' }}>{cg.budget>0?`${(cg.forecast/cg.budget*100).toFixed(0)}%`:'—'}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:(cg.risk||0)>100?'#C03A3A':'#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{(cg.risk||0)>100?fmt.k(cg.risk):'—'}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:(cg.opp||0)<-100?'#1F7A4D':'#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{(cg.opp||0)<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2' }}>{Math.abs(cg.net)>100?fmt.signed(cg.net):'—'}</td>
                               <td />
                             </tr>
@@ -446,14 +490,15 @@ function VendorDetail({ vendor: v, onClose }) {
   );
 }
 
-// ── Lean 6-column table ────────────────────────────────────────────────────
+// ── Vendor table ────────────────────────────────────────────────────
 const VTR_COLS = [
   { key:'vendor',   label:'Vendor',            cls:'',    sort:true  },
   { key:'cat',      label:'Category',           cls:'',    sort:false },
   { key:'budget',   label:'Budget',             cls:'num', sort:true  },
   { key:'actual',   label:'Actuals',            cls:'num', sort:true  },
   { key:'fconly',   label:'Forecast',           cls:'num', sort:true  },
-  { key:'actfc',    label:'Act + FC',           cls:'num', sort:true  },
+  { key:'actfc',    label:'Actuals + Forecast',cls:'num', sort:true  },
+  { key:'cons',     label:'Budget Consumption %', cls:'num', sort:true  },
   { key:'risk',     label:'Risk',               cls:'num', sort:true  },
   { key:'opp',      label:'Opportunity',        cls:'num', sort:true  },
   { key:'net',      label:'Net Risk/(Opp)',      cls:'num', sort:true, tooltip:'Sum of risk and opportunity positions.\nPositive = net risk. Negative = net opportunity.'  },
@@ -510,7 +555,9 @@ const rows = useMemoV(() => {
               'Category': v.cat || '',
               'Budget': v.budget,
               'Actuals': v.actual,
-              'Forecast': v.forecast,
+              'Forecast': Math.max((v.forecast||0) - (v.actual||0), 0),
+              'Actuals + Forecast': v.forecast,
+              'Budget Consumption %': v.budget > 0 ? (v.forecast / v.budget) : null,
               'Risk': v.risk,
               'Opportunity': v.opp,
               'Net Risk/(Opp)': v.net,
@@ -580,8 +627,12 @@ const rows = useMemoV(() => {
                   <td className="num">{v.actual>0?fmt.k(v.actual):<span style={{color:'#D8D6D2'}}>—</span>}</td>
                   {/* Forecast (remaining) */}
                   <td className="num"><span style={{ fontWeight:600 }}>{fmt.k(v.forecast - v.actual)}</span></td>
-                  {/* Act + FC */}
+                  {/* Actuals + Forecast */}
                   <td className="num" style={{ fontWeight:700, color:'#1A1F3C' }}>{fmt.k(v.forecast)}</td>
+                  {/* Budget Consumption % */}
+                  <td className="num" style={{ fontWeight:700, color: v.budget>0 ? ((v.forecast/v.budget)>1 ? '#C03A3A' : (v.forecast/v.budget)>0.85 ? '#96600A' : '#333C66') : '#D8D6D2' }}>
+                    {v.budget>0 ? `${(v.forecast/v.budget*100).toFixed(0)}%` : '—'}
+                  </td>
                   {/* Risk */}
                   <td className="num" style={{ color:(v.risk||0)>100?'#C03A3A':'#D8D6D2' }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
                   {/* Opportunity */}
@@ -598,7 +649,7 @@ const rows = useMemoV(() => {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ textAlign:'center', padding:'40px 20px', color:'#9E9B97', fontSize:13 }}>
+                <td colSpan={VTR_COLS.length} style={{ textAlign:'center', padding:'40px 20px', color:'#9E9B97', fontSize:13 }}>
                   No vendors match
                 </td>
               </tr>
