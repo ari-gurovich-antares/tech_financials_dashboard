@@ -4,7 +4,10 @@
 // Bumped every time the standalone is re-bundled with a new workbook.
 // Boot uses this to decide whether localStorage (a user upload) is newer
 // than the embedded Excel. Stale localStorage without an uploadTs loses.
-const BUNDLE_DATE = '2026-06-30T23:30:00Z'; // bumped: clickable labels, alpha vendor sort, 1-decimal fmt
+const BUNDLE_DATE = '2026-07-08T00:00:00Z'; // bumped: notesRO, dynamic as-of, vendor charts
+// Schema version — bump when parsed data shape changes (e.g. new fields added to lineItems).
+// localStorage fallback is ignored if its schema doesn't match.
+const SCHEMA_VERSION = 2;
 
 const { useState: useStateA, useEffect, useMemo: useMemoA } = React;
 
@@ -20,6 +23,148 @@ function _fmtTs(ts) {
   return i < 0 ? ts : ts.slice(0, i) + ' · ' + ts.slice(i + 2);
 }
 
+// ── YTD Reconciliation Marker ──────────────────────────────────────────
+// Subtle indicator shown in the topbar next to "last updated".
+// Green = Master Data and YTD pivot agree within $1K.
+// Amber = they differ (stale pivot or row scope change).
+// Hover reveals a popover with the diff detail.
+function YtdMarker({ workbookSubtotal, ytdSummary }) {
+  const [open, setOpen] = useStateA(false);
+  if (!ytdSummary || !workbookSubtotal) return null;
+
+  const md  = workbookSubtotal;
+  const ytd = ytdSummary;
+  const diffs = {
+    budget:   Math.round(md.budget   - ytd.budget),
+    forecast: Math.round(md.forecast - ytd.forecast),
+    risk:     Math.round(md.risk     - ytd.risk),
+    net:      Math.round(md.net      - ytd.net),
+  };
+  const reconciled = Object.values(diffs).every(d => Math.abs(d) <= 1000);
+  const fmtK = n => (n >= 0 ? '+' : '') + '$' + (n / 1000).toFixed(1) + 'K';
+  const fmtM = n => '$' + (n / 1e6).toFixed(2) + 'M';
+
+  return (
+    <div style={{ position:'relative' }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display:'flex', alignItems:'center', gap:4, cursor:'pointer',
+          padding:'3px 8px', border:'1px solid',
+          borderColor: reconciled ? 'rgba(114,212,160,0.5)' : 'rgba(255,200,80,0.5)',
+          background:  reconciled ? 'rgba(31,122,77,0.18)'  : 'rgba(150,96,10,0.18)',
+          borderRadius:3,
+        }}
+      >
+        <span style={{ width:6, height:6, borderRadius:'50%', background: reconciled ? '#72D4A0' : '#F5B942', flexShrink:0 }} />
+        <span style={{ fontSize:10, fontWeight:600, letterSpacing:'0.06em', color: reconciled ? '#A8E8C8' : '#F5D080', whiteSpace:'nowrap' }}>
+          {reconciled ? 'YTD reconciled' : 'YTD refresh needed'}
+        </span>
+      </div>
+      {open && (
+        <div style={{
+          position:'absolute', right:0, top:'calc(100% + 6px)', zIndex:200,
+          background:'#1A1F3C', border:'1px solid #333C66', borderRadius:6,
+          padding:'12px 14px', minWidth:240, boxShadow:'0 4px 16px rgba(0,0,0,0.4)',
+          fontFamily:'var(--font-sans)', fontSize:11, color:'#D8D6D2',
+        }}>
+          <div style={{ fontWeight:700, color:'#fff', marginBottom:8, fontSize:12 }}>YTD Reconciliation</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'3px 10px', marginBottom:10 }}>
+            {[['Budget', md.budget, ytd.budget], ['Forecast', md.forecast, ytd.forecast], ['Risk', md.risk, ytd.risk], ['Net', md.net, ytd.net]].map(([label, mdV, ytdV]) => {
+              const d = Math.round(mdV - ytdV);
+              return [
+                <span key={label+'-l'} style={{ color:'#9E9B97' }}>{label}</span>,
+                <span key={label+'-m'} style={{ textAlign:'right', color:'#D8D6D2', fontVariantNumeric:'tabular-nums' }}>{fmtM(mdV)}</span>,
+                <span key={label+'-d'} style={{ textAlign:'right', fontVariantNumeric:'tabular-nums', color: Math.abs(d)>1000?'#F5B942':'#72D4A0' }}>{fmtK(d)}</span>,
+              ];
+            })}
+          </div>
+          <div style={{ borderTop:'1px solid #333C66', paddingTop:8, fontSize:10, color:'#807E7A', lineHeight:1.5 }}>
+            {reconciled
+              ? 'Master Data and YTD pivot agree within $1K.'
+              : 'Suggested action: open workbook → Data → Refresh All → save → re-upload.'}
+          </div>
+          <div style={{ marginTop:6, display:'grid', gridTemplateColumns:'auto auto', gap:'2px 10px', fontSize:9.5, color:'#807E7A' }}>
+            <span>MD</span><span>Master Data (cleaned)</span>
+            <span>Diff</span><span>MD minus YTD Financials Run Rate</span>
+          </div>
+          <button onClick={e=>{e.stopPropagation();setOpen(false);}} style={{ position:'absolute', top:8, right:10, background:'none', border:'none', color:'#807E7A', cursor:'pointer', fontSize:14, lineHeight:1 }}>×</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function exportAllTables(data) {
+  if (typeof XLSX === 'undefined') { alert('SheetJS not loaded — please refresh.'); return; }
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Vendors
+  const vendorRows = (data.vendors || []).map(v => ({
+    'Vendor':          v.vendor,
+    'Domain':          (v.domains || []).join('; '),
+    'Domain Owner':    (v.domainOwners || []).join('; '),
+    'Budget':          v.budget,
+    'Actuals':         v.actual,
+    'Forecast':        v.forecast,
+    'Risk':            v.risk,
+    'Opportunity':     v.opp,
+    'Net Risk/(Opp)':  v.net,
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vendorRows), 'Vendors');
+
+  // Sheet 2: Line Items
+  const liRows = (data.lineItems || []).map(li => ({
+    'Vendor':        li.vendor,
+    'Domain':        li.domain,
+    'Domain Owner':  li.owner,
+    'Category':      li.category,
+    'Sub-Category':  li.subCategory,
+    'Project':       li.project,
+    'Application':   li.application,
+    'Budget':        li.budget,
+    'Actuals':       li.actual,
+    'Forecast':      li.forecast,
+    'Risk':          li.risk,
+    'Opportunity':   li.opp,
+    'Net':           li.net,
+    'Notes':         li.notes || '',
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(liRows), 'Line Items');
+
+  // Sheet 3: Risk & Opp Log
+  const roRows = (data.riskOppLog || []).map(li => ({
+    'Vendor':       li.vendor,
+    'Domain':       li.domain,
+    'Project':      li.project,
+    'Application':  li.application,
+    'Category':     li.category,
+    'Budget':       li.budget,
+    'Forecast':     li.forecast,
+    'Risk':         li.risk,
+    'Opportunity':  li.opp,
+    'Net':          li.net,
+    'Notes':        li.notesRO || li.notes || '',
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(roRows), 'Risk & Opp Log');
+
+  // Sheet 4: Domain Owners
+  const doRows = (data.domainOwners || []).map(o => ({
+    'Domain Owner':  o.owner,
+    'Domains':       (o.domains || []).join('; '),
+    'Vendors':       (o.vendors || []).join('; '),
+    'Budget':        o.budget,
+    'Actuals':       o.actual,
+    'Forecast':      o.forecast,
+    'Risk':          o.risk,
+    'Opportunity':   o.opp,
+    'Net':           o.net,
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(doRows), 'Domain Owners');
+
+  XLSX.writeFile(wb, '2026 Tech Financials Export.xlsx');
+}
+
 function App({ data: initialData }) {
   const [filterState, setFilterState] = useStateA({ categories:[], vendors:[], domains:[], domainOwners:[], contractTypes:[], riskOppStatus:[] });
   const [filterPanelOpen, setFilterPanelOpen] = useStateA(false);
@@ -30,9 +175,13 @@ function App({ data: initialData }) {
   const [sourceInfo, setSourceInfo] = useStateA(() => {
     try { const s = localStorage.getItem('techfin-source-v1'); return s ? JSON.parse(s) : null; } catch { return null; }
   });
-  const [asOfDate, setAsOfDate] = useStateA(() => {
-    try { return localStorage.getItem('techfin-asof-v1') || 'Jun 22, 2026'; } catch { return 'Jun 22, 2026'; }
-  });
+  // As-of = always one month before today
+  const asOfDate = (() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() - 2, 1)
+      .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  })();
+  const lastRefreshed = data._parsedAt ? new Date(data._parsedAt) : new Date();
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
@@ -47,10 +196,16 @@ function App({ data: initialData }) {
     document.body.className = `mood-${t.mood} density-${t.density}`;
   }, [t.mood, t.density]);
 
-  // ── Handle workbook upload — persist, update state, re-mount overview ──
   function handleUpload(filename, parsedData) {
+    console.log('[upload] selected file:', filename);
+    console.log('[upload] parsed lineItems count:', parsedData.lineItems ? parsedData.lineItems.length : 0);
+    if (parsedData.workbookSubtotal) {
+      const ws = parsedData.workbookSubtotal;
+      console.log('[upload] parsed budget=$'+Math.round(ws.budget/1e3)+'K forecast=$'+Math.round(ws.forecast/1e3)+'K risk=$'+Math.round(ws.risk/1e3)+'K opp=$'+Math.round(Math.abs(ws.opp)/1e3)+'K net=$'+Math.round(ws.net/1e3)+'K');
+    }
+    if (parsedData.summary) console.log('[upload] parsed backPocket=$'+Math.round((parsedData.summary.backPocket||0)/1e3)+'K');
     try {
-      localStorage.setItem('techfin-data-v1', JSON.stringify(parsedData));
+      localStorage.setItem('techfin-data-v1', JSON.stringify({ ...parsedData, _schema: SCHEMA_VERSION }));
       const now = new Date();
       const info = {
         filename,
@@ -63,17 +218,30 @@ function App({ data: initialData }) {
       };
       localStorage.setItem('techfin-source-v1', JSON.stringify(info));
       localStorage.setItem('techfin-upload-ts-v1', new Date().toISOString());
-      const asof = now.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-      localStorage.setItem('techfin-asof-v1', asof);
       setSourceInfo(info);
-      setAsOfDate(asof);
     } catch(e) {
       console.warn('[upload] localStorage write failed:', e.message);
     }
     parsedData._bootSource = 'uploaded';
+    parsedData._parsedAt = new Date().toISOString();
     setData(parsedData);
-    setUploadKey(k => k + 1); // re-mount OverviewTab to reset its local filters
+    setUploadKey(k => k + 1);
+    console.log('[upload] setData + setUploadKey dispatched');
   }
+
+  // ── Render-time active data log (fires on every data change) ────────────
+  useEffect(() => {
+    const ws  = data.workbookSubtotal;
+    const src  = data._bootSource || 'boot';
+    const ts   = data._parsedAt ? new Date(data._parsedAt).toLocaleTimeString() : 'unknown';
+    const liCount = (data.lineItems || []).length;
+    console.log('[render] active data source:', src, '| timestamp:', ts, '| lineItems:', liCount);
+    if (ws) {
+      console.log('[render] active budget=$'+Math.round(ws.budget/1e3)+'K forecast=$'+Math.round(ws.forecast/1e3)+'K risk=$'+Math.round(ws.risk/1e3)+'K opp=$'+Math.round(Math.abs(ws.opp)/1e3)+'K net=$'+Math.round(ws.net/1e3)+'K');
+    } else {
+      console.log('[render] active data source:', src, '| workbookSubtotal: null');
+    }
+  }, [data]);
 
   const filtered = useMemoA(() => {
     const items   = filterLineItems(data.lineItems, filters);
@@ -160,10 +328,17 @@ function App({ data: initialData }) {
           <Icon name="upload" size={13} color="#fff" />
           Upload Workbook
         </button>
-        <div style={{ display:'flex', gap:20, alignItems:'center' }}>
-          <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
-            <span className="label">last updated</span>
-            <span className="val">{sourceInfo ? _fmtTs(sourceInfo.timestamp) : _fmtTs(new Date(BUNDLE_DATE).toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true }))}</span>
+        <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+          <YtdMarker workbookSubtotal={data.workbookSubtotal} ytdSummary={data.ytdSummary} />
+          <div style={{ display:'flex', gap:20, alignItems:'center' }}>
+            <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
+              <span className="label">As of</span>
+              <span className="val">{asOfDate}</span>
+            </div>
+            <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
+              <span className="label">Last Refreshed</span>
+              <span className="val">{_fmtTs(lastRefreshed.toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true }))}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -243,6 +418,7 @@ function App({ data: initialData }) {
         const buf = await resp.arrayBuffer();
         data = parseTechFinancialsXlsxFromArrayBuffer(buf);
         data._bootSource = 'excel';
+        data._parsedAt = new Date().toISOString();
         console.log('[boot] Loaded uploads/new_workbook.xlsx (cache-busted, fresh fetch)');
       }
     } catch(e) {
@@ -258,7 +434,8 @@ function App({ data: initialData }) {
         const saved = localStorage.getItem('techfin-data-v1');
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (parsed && Array.isArray(parsed.lineItems) && parsed.lineItems.length > 0) {
+          if (parsed && Array.isArray(parsed.lineItems) && parsed.lineItems.length > 0
+              && parsed._schema === SCHEMA_VERSION) {
             data = parsed;
             data._bootSource = 'uploaded';
             console.log('[boot] xlsx unavailable — restored manual upload from localStorage:', parsed.lineItems.length, 'rows');

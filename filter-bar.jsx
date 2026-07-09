@@ -32,12 +32,26 @@ function MultiSelect({ label, options, selected, onChange, allLabel }) {
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, []);
-  const isAll = selected.length === 0 || selected.length === options.length;
+  const isAll = selected.length === 0;
   const display = isAll ? `${allLabel} ${options.length}` : selected.length === 1 ? selected[0] : `${selected.length} selected`;
+
+  function handleAll() {
+    // If in no-filter mode, expand to explicit-all so user can uncheck individual items
+    // If in some/explicit mode, go back to no-filter
+    if (isAll) onChange(options);
+    else       onChange([]);
+  }
+
   function toggle(o) {
-    const next = selected.includes(o) ? selected.filter(x => x !== o) : [...selected, o];
+    const base = isAll ? options : selected;
+    const next = base.includes(o) ? base.filter(x => x !== o) : [...base, o];
     onChange(next.length === options.length ? [] : next);
   }
+
+  // An item is visually checked if we're in all-mode OR it's explicitly in selected
+  const isChecked = o => isAll || selected.includes(o);
+  const allChecked = isAll || selected.length === options.length;
+
   return (
     <div className="ms" ref={ref}>
       <button className="ms-trigger" onClick={() => setOpen(!open)}>
@@ -46,19 +60,17 @@ function MultiSelect({ label, options, selected, onChange, allLabel }) {
       </button>
       {open && (
         <div className="ms-menu">
-          <button className="ms-opt all" onClick={() => { onChange([]); }}>
-            <span className="ms-check">{isAll ? '●' : '○'}</span> {allLabel} ({options.length})
+          {/* All checkbox */}
+          <button className="ms-opt all" onClick={handleAll}>
+            <span className="ms-check">{allChecked ? '●' : '○'}</span> {allLabel} ({options.length})
           </button>
           <div className="ms-divider" />
-          {options.map(o => {
-            const checked = !isAll && selected.includes(o);
-            return (
-              <button key={o} className="ms-opt" onClick={() => toggle(o)}>
-                <span className="ms-check">{checked ? '●' : '○'}</span>
-                <span style={{flex:1, overflow:'hidden', textOverflow:'ellipsis'}}>{o}</span>
-              </button>
-            );
-          })}
+          {options.map(o => (
+            <button key={o} className="ms-opt" onClick={() => toggle(o)}>
+              <span className="ms-check">{isChecked(o) ? '●' : '○'}</span>
+              <span style={{flex:1, overflow:'hidden', textOverflow:'ellipsis'}}>{o}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>

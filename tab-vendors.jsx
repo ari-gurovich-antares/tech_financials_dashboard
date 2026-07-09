@@ -8,7 +8,7 @@ function vdCat(li) {
 
 const NON_VENDOR_PATTERNS = [
   /^amortization/i, /^multiple$/i, /^amortization\/multiple$/i,
-  /^n\/a$/i, /^other$/i, /^2026 ph$/i,
+  /^n\/a$/i, /^other$/i, /^2026 ph$/i, /^ph\s*-\s*other$/i, /^ph\s*-\s*tbc$/i,
   /^software capitalization/i,
   /^t&e\s*-/i, /^general office expense/i,
   /^\s*$/,
@@ -51,27 +51,72 @@ function vendorDomCat(v) {
 
 // ── KPI Cards ────────────────────────────────────────────────────────────
 function VendorKPIs({ vendors }) {
-  const totalSpend = vendors.reduce((s, v) => s + v.forecast, 0);
-  const atRisk     = vendors.filter(v => v.net > 100);
-  const withOpp    = vendors.filter(v => v.net < -100);
-  // Aug–Dec = indices 7–11
-  const remainFC   = vendors.reduce((s, v) => s + (v.monthlyFC||[]).slice(7,12).reduce((a,x)=>a+x,0), 0);
+  const [hovered, setHovered] = useStateV(-1);
+  const totalBudget   = vendors.reduce((s, v) => s + (v.budget || 0), 0);
+  const totalForecast = vendors.reduce((s, v) => s + (v.forecast || 0), 0);
+  const totalNet      = vendors.reduce((s, v) => s + (v.net || 0), 0);
+  const netIsRisk     = totalNet > 100;
+  const netIsOpp      = totalNet < -100;
+  const netColor      = netIsRisk ? '#C03A3A' : netIsOpp ? '#1F7A4D' : '#9E9B97';
+
   const cards = [
-    { label: 'Total Vendor Forecast',    value: fmt.m2(totalSpend), sub: `${vendors.length} vendors`,                                                                            color: '#333C66', accent: '#6699FF' },
-    { label: 'Aug–Dec Remaining Spend',  value: fmt.m2(remainFC),   sub: 'Forecast Aug through Dec',                                                                             color: '#5A4A8A', accent: '#9B8FD4' },
-    { label: 'Vendors at Net Risk',      value: atRisk.length,      sub: atRisk.length  ? fmt.m2(atRisk.reduce((s,v)=>s+v.risk,0)) + ' total risk' : 'None flagged',            color: '#C03A3A', accent: '#E87878' },
-    { label: 'Vendors with Opportunity', value: withOpp.length,     sub: withOpp.length ? fmt.m2(Math.abs(withOpp.reduce((s,v)=>s+v.opp,0))) + ' total opp' : 'None flagged',   color: '#1F7A4D', accent: '#72D4A0' },
+    {
+      label: 'annual budget',
+      value: fmt.m2(totalBudget),
+      sub: `${vendors.length} active vendors · 2026 approved budget`,
+      valueColor: '#333C66',
+    },
+    {
+      label: 'year-end forecast',
+      value: fmt.m2(totalForecast),
+      sub: 'Full-year projected spend · actuals + remaining forecast',
+      valueColor: '#333C66',
+    },
+    {
+      label: 'net risk / (opportunity)',
+      value: Math.abs(totalNet) > 100 ? fmt.signed2(totalNet) : '—',
+      sub: 'Sum of all vendor risk and opportunity positions. Positive = net risk.\nNegative = net opportunity.',
+      valueColor: netColor,
+      tooltip: 'Sum of risk and opportunity positions.\nPositive = net risk. Negative = net opportunity.',
+    },
   ];
+
+  const eyebrow = label => (
+    <div style={{
+      fontFamily: 'var(--font-serif)', fontWeight: 800, fontSize: 10,
+      letterSpacing: '0.22em', textTransform: 'lowercase',
+      color: '#9E9B97', marginBottom: 10,
+    }}>{label}</div>
+  );
+
   return (
-    <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:20 }}>
-      {cards.map((c, i) => (
-        <div key={i} className="card" style={{ padding:'16px 20px', borderTop:`3px solid ${c.accent}` }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#9E9B97', marginBottom:6 }}>{c.label}</div>
-          <div style={{ fontSize:24, fontWeight:800, color:c.color, lineHeight:1, marginBottom:4, fontVariantNumeric:'tabular-nums' }}>{c.value}</div>
-          <div style={{ fontSize:11, color:'#9E9B97' }}>{c.sub}</div>
-        </div>
-      ))}
-    </div>
+    <>
+      <style>{`
+        .vkpi-flip { position: relative; cursor: default; }
+        .vkpi-front { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; transition: opacity 0.25s; }
+        .vkpi-back  { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; background: #333C66; opacity: 0; transition: opacity 0.25s; }
+        .vkpi-flip:hover .vkpi-back  { opacity: 1; }
+        .vkpi-flip:hover .vkpi-front { opacity: 0; }
+      `}</style>
+      <div className="card" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', overflow:'hidden', padding:0, maxWidth:1050, margin:'0 auto 20px' }}>
+        {cards.map((c, i) => (
+          <div key={i} className="vkpi-flip" title={c.tooltip || undefined} style={{ borderLeft: i > 0 ? '1px solid #EDECEA' : 'none', height: 128 }}>
+            <div className="vkpi-front">
+              {eyebrow(c.label)}
+              <div style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:40, lineHeight:1, letterSpacing:'-0.01em', color:c.valueColor, fontVariantNumeric:'tabular-nums' }}>
+                {c.value}
+              </div>
+              {i === 0 && <div style={{ fontSize:9, color:'#B0ADA9', marginTop:6, lineHeight:1.3 }}>* Excludes Amortization &amp; placeholder vendors</div>}
+            </div>
+            <div className="vkpi-back">
+              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.2em', textTransform:'lowercase', color:'rgba(255,255,255,0.45)', marginBottom:10, fontFamily:'var(--font-serif)' }}>{c.label}</div>
+              <div style={{ fontSize:13, fontWeight:500, color:'rgba(255,255,255,0.9)', lineHeight:1.4, fontFamily:'var(--font-sans)', whiteSpace:'pre-line' }}>{c.sub}</div>
+              <div style={{ marginTop:12, fontFamily:'var(--font-serif)', fontWeight:600, fontSize:22, color:'rgba(255,255,255,0.28)', fontVariantNumeric:'tabular-nums', letterSpacing:'-0.01em' }}>{c.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -100,314 +145,299 @@ function BudgetBar({ actual, forecast, budget }) {
 
 // ── Rich Vendor Detail ────────────────────────────────────────────────────
 function VendorDetail({ vendor: v, onClose }) {
-  const st       = vendorStatus(v);
-  const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const actCnt   = (v.monthlyAC || []).filter(x => x > 0).length;
-  const maxM     = Math.max(...[...(v.monthlyAC||[]),...(v.monthlyFC||[])].map(Math.abs), 1);
-  const consumed = v.budget > 0 ? v.forecast / v.budget * 100 : null;
+  const st     = vendorStatus(v);
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const acArr  = v.monthlyAC || [];
+  // Stop at first gap so future months with stray data don't count as actuals
+  let actCnt = 0;
+  for (let i = 0; i < 12; i++) {
+    if ((acArr[i] || 0) > 1) actCnt = i + 1;
+    else break;
+  }
+  const maxM   = Math.max(...[...(v.monthlyAC||[]),...(v.monthlyFC||[])].map(Math.abs), 1);
 
-  // Category breakdown
-  const cats = useMemoV(() => {
-    const m = {};
-    (v.lineItems || []).forEach(li => {
-      const c = li.subCategory || li.category || 'Other';
-      if (!m[c]) m[c] = { budget:0, actual:0, forecast:0, net:0, risk:0, opp:0 };
-      m[c].budget   += li.budget || 0;
-      m[c].actual   += (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-      m[c].forecast += (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
-      m[c].net      += li.net || 0;
-      m[c].risk     += li.risk || 0;
-      m[c].opp      += li.opp  || 0;
-    });
-    return Object.entries(m).sort((a,b) => b[1].forecast - a[1].forecast);
-  }, [v]);
-
-  // Domain/owner breakdown
-  const owners = useMemoV(() => {
-    const m = {};
-    (v.lineItems || []).forEach(li => {
-      const key = li.owner || 'Unallocated';
-      const dom = li.domain || '';
-      const k = dom ? `${key} · ${dom}` : key;
-      if (!m[k]) m[k] = { forecast:0, budget:0, net:0 };
-      m[k].forecast += (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
-      m[k].budget   += li.budget || 0;
-      m[k].net      += li.net || 0;
-    });
-    return Object.entries(m).sort((a,b) => b[1].forecast - a[1].forecast);
-  }, [v]);
-
-  // Line items
+  const [expandedCat, setExpandedCat] = useStateV(null);
   const lineItems = v.lineItems || [];
-  const liTotal   = { budget:0, actual:0, forecast:0, net:0 };
-  lineItems.forEach(li => {
-    liTotal.budget   += li.budget || 0;
-    liTotal.actual   += (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-    liTotal.forecast += (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
-    liTotal.net      += li.net || 0;
-  });
+
+
+
+
+  // ── Category groups for two-level drill-down ─────────────────────────
+  const catGroups = useMemoV(() => {
+    // Build rollup per category from lineItems
+    const rollup = new Map();
+    for (const li of lineItems) {
+      const cat = li.spendCategory || li.subCategory || li.category || '(Uncategorized)';
+      if (!rollup.has(cat)) rollup.set(cat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0, items:[] });
+      const g = rollup.get(cat);
+      const ac = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
+      const fc = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
+      g.items.push(li); g.budget += li.budget||0; g.actual += ac; g.forecast += fc;
+      g.risk += li.risk||0; g.opp += li.opp||0; g.net += li.net||0;
+    }
+    // If Notes sheet provided ordered category rows, use that order + notes
+    if (v.categoryNotes && v.categoryNotes.length) {
+      const groups = v.categoryNotes.map(({ category, note }) => {
+        // Try exact match first, then case-insensitive
+        const r = rollup.get(category)
+          || rollup.get([...rollup.keys()].find(k => k.toLowerCase() === category.toLowerCase()) || '')
+          || { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0, items:[] };
+        return { category, note, ...r };
+      });
+      // Append any lineItem categories not in Notes sheet
+      for (const [cat, r] of rollup) {
+        if (!groups.find(g => g.category === cat)) groups.push({ category: cat, note:'', ...r });
+      }
+      return groups;
+    }
+    return [...rollup.entries()]
+      .map(([cat, r]) => ({ category: cat, note: r.items.find(li => li.notesRO)?.notesRO || '', ...r }))
+      .sort((a, b) => (b.budget||0) - (a.budget||0));
+  }, [lineItems, v.categoryNotes]);
+
+
+
+  const netIsRisk = v.net > 100;
+  const netIsOpp  = v.net < -100;
+  const [netCardHover, setNetCardHover] = useStateV(false);
 
   return (
     <div style={{ borderTop:'2px solid #6699FF30', background:'#FAFAF8' }}>
+
       {/* ── Header ── */}
       <div style={{ background:st.bg, padding:'16px 24px', borderBottom:`1px solid ${st.color}20`, display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
         <div>
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
             <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'#fff', background:st.color, padding:'2px 8px', borderRadius:3 }}>{st.label}</span>
-            {v.domains?.length > 0 && <span style={{ fontSize:11, color:'#9E9B97' }}>{v.domains.join(' · ')}</span>}
           </div>
-          <div style={{ fontSize:20, fontWeight:800, color:'#1A1F3C', letterSpacing:'-0.01em' }}>{v.vendor}</div>
+          <div style={{ fontSize:20, fontWeight:800, color:'#1A1F3C', letterSpacing:'-0.01em', marginBottom:6 }}>{v.vendor}</div>
+          <div style={{ display:'flex', gap:20, flexWrap:'wrap' }}>
+            {v.domains?.length > 0 && (
+              <span style={{ fontSize:11, color:'#807E7A' }}>
+                <span style={{ color:'#B0ADA9', marginRight:4 }}>Domain:</span>{v.domains.join(' · ')}
+              </span>
+            )}
+            {v.domainOwners?.length > 0 && (
+              <span style={{ fontSize:11, color:'#807E7A' }}>
+                <span style={{ color:'#B0ADA9', marginRight:4 }}>Owner:</span>{v.domainOwners.join(' · ')}
+              </span>
+            )}
+            <span style={{ fontSize:11, color:'#B0ADA9' }}>{lineItems.length} line item{lineItems.length!==1?'s':''}</span>
+          </div>
         </div>
         <button onClick={onClose} style={{ background:'#fff', border:'1px solid #EDECEA', cursor:'pointer', color:'#807E7A', fontSize:12, fontWeight:600, padding:'6px 14px', display:'flex', alignItems:'center', gap:5, flexShrink:0, whiteSpace:'nowrap' }}>
           <Icon name="close" size={11} color="#9E9B97" /> Close
         </button>
       </div>
 
-      <div style={{ padding:'20px 24px', display:'grid', gap:20 }}>
+      <div style={{ padding:'20px 24px', display:'grid', gap:20, minWidth:0 }}>
 
-        {/* ── KPI strip ── */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:8 }}>
-          {[
-            ['Budget',        fmt.m2(v.budget),                       null,                                              'Total approved budget'],
-            ['YTD Actual',    fmt.m2(v.actual),                       null,                                              'Spent year-to-date'],
-            ['Year-End FC',   fmt.m2(v.forecast),                     null,                                              'Full-year forecast'],
-            ['Remaining',     fmt.m2(v.budget - v.forecast),          (v.budget-v.forecast)<-100?'#C03A3A':'#1F7A4D',   'Budget − Year-End FC'],
-            ['Consumed',      consumed!=null?consumed.toFixed(1)+'%':'—', consumed>100?'#C03A3A':consumed>85?'#96600A':'#333C66', 'Year-End FC ÷ Budget'],
-            ['Risk',          v.risk > 100 ? fmt.m2(v.risk) : '—',   v.risk>100?'#C03A3A':null,                         'Upside forecast exposure'],
-            ['Net Position',  Math.abs(v.net)>100?fmt.signed2(v.net):'—', v.net>100?'#C03A3A':v.net<-100?'#1F7A4D':'#9E9B97', 'Risk minus Opportunity'],
-          ].map(([l, val, clr, tip], i) => (
-            <div key={i} style={{ padding:'12px 14px', background:'#fff', border:'1px solid #EDECEA', borderRadius:4 }} title={tip}>
-              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.07em', textTransform:'uppercase', color:'#B0ADA9', marginBottom:5 }}>{l}</div>
-              <div style={{ fontSize:15, fontWeight:800, color:clr||'#1A1F3C', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{val}</div>
+        {/* ── 3 KPI cards ── */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
+          <div style={{ padding:'16px 20px', background:'#fff', border:'1px solid #EDECEA', borderRadius:6, borderTop:'3px solid #6699FF' }}>
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#B0ADA9', marginBottom:6 }}>Annual Budget</div>
+            <div style={{ fontSize:22, fontWeight:800, color:'#333C66', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{fmt.m2(v.budget)}</div>
+          </div>
+          <div style={{ padding:'16px 20px', background:'#fff', border:'1px solid #EDECEA', borderRadius:6, borderTop:`3px solid ${v.forecast>v.budget?'#E87878':'#6699FF'}` }}>
+            <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#B0ADA9', marginBottom:6 }}>Year-End Forecast</div>
+            <div style={{ fontSize:22, fontWeight:800, color:v.forecast>v.budget?'#C03A3A':'#333C66', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{fmt.m2(v.forecast)}</div>
+            <div style={{ fontSize:11, color:'#9E9B97', marginTop:5 }}>{fmt.m2(Math.abs(v.forecast-v.budget))} {v.forecast>v.budget?'over':'under'} budget</div>
+          </div>
+          <div
+            style={{ padding:'16px 20px', background:'#fff', border:'1px solid #EDECEA', borderRadius:6, borderTop:`3px solid ${netIsRisk?'#E87878':netIsOpp?'#72D4A0':'#D0CEC8'}`, position:'relative', overflow:'hidden', cursor:'default' }}
+            onMouseEnter={() => setNetCardHover(true)}
+            onMouseLeave={() => setNetCardHover(false)}
+          >
+            <div style={{ position:'absolute', inset:0, padding:'16px 20px', display:'flex', flexDirection:'column', transition:'opacity 0.25s', opacity: netCardHover ? 0 : 1 }}>
+              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#B0ADA9', marginBottom:6 }}>Net Risk / (Opportunity)</div>
+              <div style={{ fontSize:22, fontWeight:800, color:netIsRisk?'#C03A3A':netIsOpp?'#1F7A4D':'#9E9B97', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>
+                {Math.abs(v.net)>100 ? fmt.signed2(v.net) : '—'}
+              </div>
+              <div style={{ fontSize:11, color:'#9E9B97', marginTop:5 }}>{netIsRisk?'Net risk exposure':netIsOpp?'Net opportunity':'Balanced'}</div>
             </div>
-          ))}
+            <div style={{ position:'absolute', inset:0, padding:'16px 20px', display:'flex', flexDirection:'column', justifyContent:'center', background:'#333C66', transition:'opacity 0.25s', opacity: netCardHover ? 1 : 0 }}>
+              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.18em', textTransform:'lowercase', color:'rgba(255,255,255,0.45)', marginBottom:8, fontFamily:'var(--font-serif)' }}>net risk / (opportunity)</div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.88)', lineHeight:1.45 }}>Sum of all vendor risk and opportunity positions. Positive = net risk. Negative = net opportunity.</div>
+            </div>
+          </div>
         </div>
 
-        {/* ── Risk / Opportunity callout ── */}
-        {(v.risk > 100 || v.opp > 100) && (
-          <div style={{ display:'grid', gridTemplateColumns: v.risk>100 && v.opp>100 ? '1fr 1fr' : '1fr', gap:10 }}>
-            {v.risk > 100 && (
-              <div style={{ background:'#FDF0F0', border:'1px solid #E87878', borderRadius:6, padding:'12px 16px', display:'flex', alignItems:'flex-start', gap:10 }}>
-                <Icon name="alert" size={16} color="#C03A3A" />
-                <div>
-                  <div style={{ fontSize:11, fontWeight:700, color:'#C03A3A', marginBottom:3 }}>Risk: {fmt.m2(v.risk)}</div>
-                  <div style={{ fontSize:11, color:'#9E9B97', lineHeight:1.5 }}>
-                    {lineItems.filter(li => (li.risk||0)>100).map((li,i) => (
-                      <div key={i}><span style={{ color:'#C03A3A' }}>{fmt.k(li.risk)}</span> — {li.application||li.project||li.subCategory||'line item'}</div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-            {v.opp > 100 && (
-              <div style={{ background:'#EFF7F3', border:'1px solid #72D4A0', borderRadius:6, padding:'12px 16px', display:'flex', alignItems:'flex-start', gap:10 }}>
-                <Icon name="trend" size={16} color="#1F7A4D" />
-                <div>
-                  <div style={{ fontSize:11, fontWeight:700, color:'#1F7A4D', marginBottom:3 }}>Opportunity: {fmt.m2(v.opp)}</div>
-                  <div style={{ fontSize:11, color:'#9E9B97', lineHeight:1.5 }}>
-                    {lineItems.filter(li => (li.opp||0)>100).map((li,i) => (
-                      <div key={i}><span style={{ color:'#1F7A4D' }}>{fmt.k(li.opp)}</span> — {li.application||li.project||li.subCategory||'line item'}</div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Monthly trend ── */}
+        {/* ── Monthly Breakdown table ── */}
         {(v.monthlyAC||[]).some(x => x > 0) && (
           <div>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-              <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#9E9B97' }}>Monthly Trend — Actual vs Forecast</span>
-              <span style={{ display:'flex', gap:14, fontSize:11, color:'#9E9B97' }}>
-                <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:10, height:10, background:'#333C66', display:'inline-block', borderRadius:2 }}></span>Actual</span>
-                <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:10, height:10, background:'#6699FF', opacity:0.55, display:'inline-block', borderRadius:2 }}></span>Forecast</span>
-              </span>
-            </div>
-            <div style={{ position:'relative' }}>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(12,1fr)', gap:4, height:90, alignItems:'end' }}>
-                {MONTHS.map((mo, i) => {
-                  const ac   = (v.monthlyAC||[])[i] || 0;
-                  const _sfc = synthMonthlyFC(v.monthlyAC, v.monthlyFC, v.forecast);
-                  const fc   = _sfc[i] || 0;
-                  const isAc = i < actCnt;
-                  const val  = isAc ? ac : fc;
-                  const h    = val > 0 ? Math.max(3, (val / maxM) * 84) : 0;
-                  return (
-                    <div key={i} style={{ height:'100%', display:'flex', flexDirection:'column', justifyContent:'flex-end', alignItems:'center' }}>
-                      <div
-                        style={{ width:'100%', height:h, background:isAc?'#333C66':'#6699FF', opacity:isAc?1:0.55, borderRadius:'2px 2px 0 0', cursor:'default' }}
-                        title={`${mo}: ${fmt.k(val)}`}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(12,1fr)', gap:4, marginTop:5 }}>
-                {MONTHS.map((mo, i) => (
-                  <div key={mo} style={{ fontSize:9, textAlign:'center', color: i < actCnt ? '#807E7A' : '#C8C6C0', fontWeight: i < actCnt ? 600 : 400 }}>{mo}</div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Category & Domain breakdown ── */}
-        <div style={{ display:'grid', gridTemplateColumns: owners.length > 1 ? '1fr 1fr' : '1fr', gap:16 }}>
-          {/* Category */}
-          {cats.length > 0 && (
-            <div>
-              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#9E9B97', marginBottom:10 }}>Category Breakdown</div>
-              <div style={{ display:'flex', flexDirection:'column', gap:0, border:'1px solid #EDECEA', borderRadius:6, overflow:'hidden' }}>
-                {cats.map(([cat, c], i) => {
-                  const pct = v.forecast > 0 ? c.forecast / v.forecast * 100 : 0;
-                  return (
-                    <div key={cat} style={{ display:'grid', gridTemplateColumns:'1fr 56px 64px 58px', gap:8, alignItems:'center', padding:'9px 12px', background:i%2===0?'#fff':'#FAFAF8', borderBottom: i<cats.length-1?'1px solid #F2F0EE':'none' }}>
-                      <div>
-                        <div style={{ fontSize:11, fontWeight:500, color:'#1A1F3C', marginBottom:3 }}>{cat}</div>
-                        <div style={{ height:3, background:'#EDECEA', borderRadius:2 }}>
-                          <div style={{ height:'100%', width:`${pct}%`, background:'#6699FF', borderRadius:2 }} />
-                        </div>
-                      </div>
-                      <span style={{ fontSize:11, textAlign:'right', color:'#9E9B97', fontVariantNumeric:'tabular-nums' }}>{fmt.k(c.budget)}</span>
-                      <span style={{ fontSize:11, fontWeight:600, textAlign:'right', color:'#1A1F3C', fontVariantNumeric:'tabular-nums' }}>{fmt.k(c.forecast)}</span>
-                      <span style={{ fontSize:11, fontWeight:600, textAlign:'right', fontVariantNumeric:'tabular-nums', color:c.net>100?'#C03A3A':c.net<-100?'#1F7A4D':'#C8C6C0' }}>
-                        {Math.abs(c.net)<100?'—':fmt.signed(c.net)}
-                      </span>
-                    </div>
-                  );
-                })}
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 56px 64px 58px', gap:8, padding:'6px 12px', background:'#F5F3F0', borderTop:'1px solid #EDECEA' }}>
-                  <span style={{ fontSize:10, color:'#9E9B97', fontWeight:700 }}>Total</span>
-                  <span style={{ fontSize:11, textAlign:'right', color:'#9E9B97', fontVariantNumeric:'tabular-nums', fontWeight:700 }}>{fmt.k(v.budget)}</span>
-                  <span style={{ fontSize:11, textAlign:'right', color:'#1A1F3C', fontVariantNumeric:'tabular-nums', fontWeight:700 }}>{fmt.k(v.forecast)}</span>
-                  <span style={{ fontSize:11, textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:700, color:v.net>100?'#C03A3A':v.net<-100?'#1F7A4D':'#C8C6C0' }}>
-                    {Math.abs(v.net)<100?'—':fmt.signed(v.net)}
-                  </span>
-                </div>
-              </div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 56px 64px 58px', gap:8, padding:'3px 12px 0', fontSize:9, color:'#C8C6C0' }}>
-                <span />
-                <span style={{ textAlign:'right' }}>Budget</span>
-                <span style={{ textAlign:'right' }}>FC</span>
-                <span style={{ textAlign:'right' }}>Net</span>
-              </div>
-            </div>
-          )}
-
-          {/* Domain/Owner breakdown */}
-          {owners.length > 1 && (
-            <div>
-              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#9E9B97', marginBottom:10 }}>Domain / Owner</div>
-              <div style={{ display:'flex', flexDirection:'column', gap:0, border:'1px solid #EDECEA', borderRadius:6, overflow:'hidden' }}>
-                {owners.map(([key, o], i) => {
-                  const pct = v.forecast > 0 ? o.forecast / v.forecast * 100 : 0;
-                  return (
-                    <div key={key} style={{ display:'grid', gridTemplateColumns:'1fr 64px 58px', gap:8, alignItems:'center', padding:'9px 12px', background:i%2===0?'#fff':'#FAFAF8', borderBottom: i<owners.length-1?'1px solid #F2F0EE':'none' }}>
-                      <div>
-                        <div style={{ fontSize:11, fontWeight:500, color:'#1A1F3C', marginBottom:3, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{key}</div>
-                        <div style={{ height:3, background:'#EDECEA', borderRadius:2 }}>
-                          <div style={{ height:'100%', width:`${pct}%`, background:'#9B8FD4', borderRadius:2 }} />
-                        </div>
-                      </div>
-                      <span style={{ fontSize:11, fontWeight:600, textAlign:'right', color:'#1A1F3C', fontVariantNumeric:'tabular-nums' }}>{fmt.k(o.forecast)}</span>
-                      <span style={{ fontSize:11, textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:o.net>100?'#C03A3A':o.net<-100?'#1F7A4D':'#C8C6C0' }}>
-                        {Math.abs(o.net)<100?'—':fmt.signed(o.net)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 64px 58px', gap:8, padding:'3px 12px 0', fontSize:9, color:'#C8C6C0' }}>
-                <span />
-                <span style={{ textAlign:'right' }}>FC</span>
-                <span style={{ textAlign:'right' }}>Net</span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Line Items table ── */}
-        {lineItems.length > 0 && (
-          <div>
-            <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#9E9B97', marginBottom:10 }}>
-              Contract / Project Detail
-              <span style={{ fontSize:10, fontWeight:400, textTransform:'none', letterSpacing:0, color:'#C8C6C0', marginLeft:8 }}>
-                {lineItems.length} line items — total reconciles to vendor row
-              </span>
-            </div>
-            <div style={{ overflowX:'auto', border:'1px solid #EDECEA', borderRadius:6, overflow:'hidden' }}>
-              <table className="tbl" style={{ fontSize:12 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:'#1A1F3C', marginBottom:10 }}>Monthly Breakdown</div>
+            <div style={{ overflowX:'auto', border:'1px solid #EDECEA', borderRadius:6 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
                 <thead>
-                  <tr>
-                    <th style={{ minWidth:180 }}>Application / Project</th>
-                    <th>Category</th>
-                    <th>Domain / Owner</th>
-                    <th className="num">Budget</th>
-                    <th className="num">YTD Actual</th>
-                    <th className="num" style={{ minWidth:100 }}>Year-End FC</th>
-                    <th className="num">Consumed</th>
-                    <th className="num">Net</th>
-                    <th style={{ minWidth:72 }}>Trend</th>
+                  <tr style={{ background:'#F5F3F0' }}>
+                    <th style={{ padding:'8px 14px', textAlign:'left', fontWeight:600, color:'#9E9B97', fontSize:11, width:80, borderBottom:'1px solid #EDECEA' }}></th>
+                    {MONTHS.map((mo, i) => (
+                      <th key={mo} style={{ padding:'8px 10px', textAlign:'center', fontWeight:500, color: i < actCnt ? '#807E7A' : '#B0ADA9', fontSize:11, borderBottom:'1px solid #EDECEA', whiteSpace:'nowrap' }}>
+                        {mo.toLowerCase()}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {lineItems.map((li, i) => {
-                    const liAc   = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-                    const liFc   = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
-                    const liCons = li.budget > 0 ? liFc / li.budget * 100 : null;
-                    return (
-                      <tr key={i}>
-                        <td>
-                          <div style={{ fontWeight:500, color:'#1A1F3C', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:220 }} title={li.application||li.project||'—'}>
-                            {li.application || li.project || '—'}
-                          </div>
-                          {li.project && li.application && (
-                            <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:220 }} title={li.project}>{li.project}</div>
-                          )}
+                  {/* Actuals row */}
+                  <tr style={{ borderBottom:'1px solid #F2F0EE' }}>
+                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Actuals</td>
+                    {MONTHS.map((mo, i) => {
+                      const ac = (v.monthlyAC||[])[i] || 0;
+                      const show = i < actCnt && ac > 0;
+                      return (
+                        <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color: show ? '#1A1F3C' : '#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
+                          {show ? fmt.k(ac) : '—'}
                         </td>
-                        <td style={{ color:'#807E7A', whiteSpace:'nowrap' }}>{li.subCategory || li.category || '—'}</td>
-                        <td style={{ color:'#807E7A', whiteSpace:'nowrap', fontSize:11 }}>
-                          <div>{li.domain || '—'}</div>
-                          {li.owner && li.owner !== 'N/A' && <div style={{ fontSize:10, color:'#C8C6C0' }}>{li.owner}</div>}
-                        </td>
-                        <td className="num" style={{ color:'#9E9B97' }}>{li.budget > 0 ? fmt.k(li.budget) : <span style={{ color:'#D8D6D2' }}>—</span>}</td>
-                        <td className="num">{liAc > 0 ? fmt.k(liAc) : <span style={{ color:'#D8D6D2' }}>—</span>}</td>
-                        <td className="num"><span style={{ fontWeight:600 }}>{fmt.k(liFc)}</span></td>
-                        <td className="num">
-                          {liCons !== null
-                            ? <span style={{ color:liCons>100?'#C03A3A':liCons>85?'#96600A':'#807E7A', fontWeight:liCons>100?700:400 }}>{liCons.toFixed(0)}%</span>
-                            : <span style={{ color:'#D8D6D2' }}>—</span>}
-                        </td>
-                        <td className={`num ${(li.net||0)>100?'neg':(li.net||0)<-100?'pos':'zero'}`}>
-                          {Math.abs(li.net||0)<100?<span style={{ color:'#D8D6D2' }}>—</span>:fmt.signed(li.net)}
-                        </td>
-                        <td>
-                          <Sparkline ac={li.monthlyAC||[]} fc={synthMonthlyFC(li.monthlyAC, li.monthlyFC, li.forecast)} height={22} width={72} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                {/* Reconciliation total row */}
-                <tfoot>
-                  <tr style={{ background:'#F5F3F0', fontWeight:700 }}>
-                    <td style={{ fontSize:11, color:'#807E7A', fontWeight:700 }}>Vendor Total</td>
-                    <td colSpan={2} />
-                    <td className="num" style={{ color:'#9E9B97', fontVariantNumeric:'tabular-nums' }}>{fmt.k(liTotal.budget)}</td>
-                    <td className="num" style={{ fontVariantNumeric:'tabular-nums' }}>{fmt.k(liTotal.actual)}</td>
-                    <td className="num" style={{ color:'#1A1F3C', fontVariantNumeric:'tabular-nums', fontWeight:800 }}>{fmt.k(liTotal.forecast)}</td>
-                    <td className="num" style={{ color: liTotal.forecast > liTotal.budget ? '#C03A3A' : '#1F7A4D', fontVariantNumeric:'tabular-nums' }}>
-                      {liTotal.budget > 0 ? (liTotal.forecast/liTotal.budget*100).toFixed(0)+'%' : '—'}
-                    </td>
-                    <td className={`num ${liTotal.net>100?'neg':liTotal.net<-100?'pos':'zero'}`} style={{ fontWeight:800 }}>
-                      {Math.abs(liTotal.net)<100?'—':fmt.signed(liTotal.net)}
-                    </td>
-                    <td />
+                      );
+                    })}
                   </tr>
-                </tfoot>
+                  {/* Forecast row */}
+                  <tr style={{ borderBottom:'1px solid #F2F0EE' }}>
+                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Forecast</td>
+                    {MONTHS.map((mo, i) => {
+                      const fc = (v.monthlyFC||[])[i] || 0;
+                      return (
+                        <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color: fc > 0 ? '#6699FF' : '#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
+                          {fc > 0 ? fmt.k(fc) : '—'}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  {/* Variance row */}
+                  <tr>
+                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Variance</td>
+                    {MONTHS.map((mo, i) => {
+                      const ac  = (v.monthlyAC||[])[i] || 0;
+                      const sfc = synthMonthlyFC(v.monthlyAC, v.monthlyFC, v.forecast);
+                      const fc  = sfc[i] || 0;
+                      if (i >= actCnt || ac === 0) {
+                        return <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color:'#C8C6C0' }}>—</td>;
+                      }
+                      const diff = ac - fc;
+                      if (Math.abs(diff) < 1) {
+                        return <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color:'#C8C6C0' }}>—</td>;
+                      }
+                      const unfav = diff > 0;
+                      return (
+                        <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color: unfav ? '#C03A3A' : '#1F7A4D', fontWeight:600, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
+                          {unfav ? '+' : ''}{fmt.k(diff)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tbody>
               </table>
+            </div>
+            {/* Legend */}
+            <div style={{ display:'flex', gap:16, marginTop:8, fontSize:11, color:'#9E9B97', flexWrap:'wrap' }}>
+              <span style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <span style={{ width:10, height:10, background:'#333C66', display:'inline-block', borderRadius:1 }}></span>
+                Actuals
+              </span>
+              <span style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <span style={{ width:10, height:10, background:'#6699FF', display:'inline-block', borderRadius:1 }}></span>
+                Forecast
+              </span>
+              <span style={{ display:'flex', alignItems:'center', gap:4 }}>
+                <span style={{ color:'#C03A3A', fontWeight:700 }}>+</span> Unfavorable variance
+              </span>
+              <span style={{ display:'flex', alignItems:'center', gap:4 }}>
+                <span style={{ color:'#1F7A4D', fontWeight:700 }}>—</span> Favorable variance
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Two-level drill-down: Category → Project ── */}
+        {lineItems.length > 0 && (
+          <div>
+            <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#9E9B97', marginBottom:10 }}>
+              Line Items by Category
+              <span style={{ fontSize:10, fontWeight:400, textTransform:'none', letterSpacing:0, color:'#C8C6C0', marginLeft:8 }}>{lineItems.length} items · {catGroups.length} {catGroups.length===1?'category':'categories'}</span>
+            </div>
+            <div style={{ border:'1px solid #EDECEA', borderRadius:6, overflow:'hidden' }}>
+              {catGroups.map((cg, ci) => {
+                const isOpen = expandedCat === cg.category;
+                const cons   = cg.budget > 0 ? cg.forecast / cg.budget * 100 : null;
+                return (
+                  <div key={cg.category}>
+                    {/* Level 1 – category row */}
+                    <div
+                      onClick={() => setExpandedCat(isOpen ? null : cg.category)}
+                      style={{ display:'grid', gridTemplateColumns:'1fr repeat(4,auto)', gap:20, padding:'12px 16px', background: isOpen ? '#EEF0FA' : ci%2===0?'#fff':'#FAFAF8', borderBottom:'1px solid #EDECEA', cursor:'pointer', alignItems:'start' }}
+                    >
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:13, color:'#1A1F3C', display:'flex', alignItems:'center', gap:8 }}>
+                          <span style={{ fontSize:9, color: isOpen?'#6699FF':'#B0ADA9', display:'inline-block', transform: isOpen?'rotate(90deg)':'none', transition:'transform 0.15s', lineHeight:1 }}>▶</span>
+                          {cg.category}
+                          <span style={{ fontSize:10, fontWeight:400, color:'#B0ADA9' }}>{cg.items.length} line{cg.items.length!==1?'s':''}</span>
+                        </div>
+                        {cg.note && (
+                          <div style={{ fontSize:11, color:'#807E7A', marginTop:5, marginLeft:17, lineHeight:1.45, maxWidth:440 }}>{cg.note}</div>
+                        )}
+                      </div>
+                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actuals', cg.actual>0?fmt.k(cg.actual):'—'], ['Forecast', fmt.k(cg.forecast)], ['Consumption', cons!==null?`${cons.toFixed(0)}%`:'—']].map(([lbl,val],vi) => (
+                        <div key={lbl} style={{ textAlign:'right', minWidth:64 }}>
+                          <div style={{ fontSize:9, color:'#B0ADA9', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3 }}>{lbl}</div>
+                          <div style={{ fontSize:13, fontWeight:700, color: lbl==='Consumption'&&cons!==null ? (cons>100?'#C03A3A':cons>85?'#96600A':'#333C66') : '#333C66', fontVariantNumeric:'tabular-nums' }}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Level 2 – project rows */}
+                    {isOpen && (
+                      <div style={{ background:'#F6F7FB', borderBottom:'1px solid #EDECEA' }}>
+                        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                          <thead>
+                            <tr style={{ background:'#EAECF6' }}>
+                              <th style={{ padding:'7px 16px 7px 32px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Project / Application</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Budget</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Actuals</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Forecast</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Net R/(O)</th>
+                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cg.items.map((li, idx) => {
+                              const acLI = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
+                              const fcLI = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
+                              return (
+                                <tr key={idx} style={{ borderTop:'1px solid #E4E6F2', background: idx%2===0?'#F6F7FB':'#F0F1F8' }}>
+                                  <td style={{ padding:'8px 12px 8px 32px', color:'#1A1F3C' }}>
+                                    <div style={{ fontWeight:500 }}>{li.application || li.project || '—'}</div>
+                                    {li.project && li.application && <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1 }}>{li.project}</div>}
+                                  </td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:li.budget>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{li.budget>0?fmt.k(li.budget):'—'}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:acLI>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{acLI>0?fmt.k(acLI):'—'}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(fcLI)}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', fontWeight:Math.abs(li.net||0)>100?600:400, color:(li.net||0)>100?'#C03A3A':(li.net||0)<-100?'#1F7A4D':'#D8D6D2' }}>
+                                    {Math.abs(li.net||0)>100?fmt.signed(li.net):'—'}
+                                  </td>
+                                  <td style={{ padding:'8px 16px 8px 12px', color:'#807E7A', fontSize:10, lineHeight:1.4, wordBreak:'break-word', maxWidth:200 }}>
+                                    {li.notes || <span style={{ color:'#D8D6D2' }}>—</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ background:'#EAECF6', borderTop:'2px solid #6699FF30' }}>
+                              <td style={{ padding:'8px 12px 8px 32px', fontWeight:700, color:'#333C66', fontSize:11 }}>Subtotal</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.budget>0?fmt.k(cg.budget):'—'}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.actual>0?fmt.k(cg.actual):'—'}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast)}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2' }}>{Math.abs(cg.net)>100?fmt.signed(cg.net):'—'}</td>
+                              <td />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -418,41 +448,23 @@ function VendorDetail({ vendor: v, onClose }) {
 
 // ── Lean 6-column table ────────────────────────────────────────────────────
 const VTR_COLS = [
-  { key:'vendor',   label:'Vendor',           cls:'',    sort:true  },
-  { key:'cat',      label:'Category',          cls:'',    sort:false },
-  { key:'forecast', label:'Year-End Forecast', cls:'num', sort:true  },
-  { key:'budget',   label:'vs Budget',         cls:'',    sort:true  },
-  { key:'net',      label:'Net Position',      cls:'num', sort:true  },
-  { key:'trend',    label:'Trend',             cls:'',    sort:false },
+  { key:'vendor',   label:'Vendor',            cls:'',    sort:true  },
+  { key:'cat',      label:'Category',           cls:'',    sort:false },
+  { key:'budget',   label:'Budget',             cls:'num', sort:true  },
+  { key:'actual',   label:'Actuals',            cls:'num', sort:true  },
+  { key:'fconly',   label:'Forecast',           cls:'num', sort:true  },
+  { key:'actfc',    label:'Act + FC',           cls:'num', sort:true  },
+  { key:'risk',     label:'Risk',               cls:'num', sort:true  },
+  { key:'opp',      label:'Opportunity',        cls:'num', sort:true  },
+  { key:'net',      label:'Net Risk/(Opp)',      cls:'num', sort:true, tooltip:'Sum of risk and opportunity positions.\nPositive = net risk. Negative = net opportunity.'  },
 ];
 
 function VendorTable({ vendors, onSelect, selected }) {
   const [search, setSearch] = useStateV('');
-  const [chip,   setChip]   = useStateV('all');
-  const [sort,   setSort]   = useStateV({ col:'budget', dir:'desc' });
-  const detailRef           = useRefV(null);
 
-  useEffectV(() => {
-    if (selected && detailRef.current) {
-      const el = detailRef.current;
-      setTimeout(() => {
-        const top = el.getBoundingClientRect().top + window.pageYOffset - 80;
-        window.scrollTo({ top: Math.max(0, top), behavior:'smooth' });
-      }, 60);
-    }
-  }, [selected?.vendor]);
-
-  const chipFiltered = useMemoV(() => {
-    switch (chip) {
-      case 'risk': return vendors.filter(v => v.net > 100);
-      case 'opp':  return vendors.filter(v => v.net < -100);
-      case 'over': return vendors.filter(v => v.forecast > v.budget && v.budget > 0);
-      default:     return vendors;
-    }
-  }, [vendors, chip]);
-
-  const rows = useMemoV(() => {
-    let list = chipFiltered;
+  const [sort,   setSort]   = useStateV({ col:'actual', dir:'desc' });
+const rows = useMemoV(() => {
+    let list = vendors;
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(v => v.vendor.toLowerCase().includes(q));
@@ -460,24 +472,23 @@ function VendorTable({ vendors, onSelect, selected }) {
     const { col, dir } = sort;
     const mul = dir === 'desc' ? -1 : 1;
     return [...list].sort((a, b) => {
-      if (col === 'vendor')   return mul * a.vendor.localeCompare(b.vendor);
-      if (col === 'forecast') return mul * (a.forecast - b.forecast);
-      if (col === 'budget')   return mul * (a.budget - b.budget);
-      if (col === 'net')      return mul * (a.net - b.net);
+      if (col === 'vendor') return mul * a.vendor.localeCompare(b.vendor);
+      if (col === 'budget') return mul * ((a.budget||0)   - (b.budget||0));
+      if (col === 'actual') return mul * ((a.actual||0)   - (b.actual||0));
+      if (col === 'fconly') return mul * ((a.forecast - a.actual) - (b.forecast - b.actual));
+      if (col === 'actfc')  return mul * ((a.forecast||0) - (b.forecast||0));
+      if (col === 'cons')   return mul * ((a.budget>0?a.forecast/a.budget:0) - (b.budget>0?b.forecast/b.budget:0));
+      if (col === 'risk')   return mul * ((a.risk||0)     - (b.risk||0));
+      if (col === 'opp')    return mul * (Math.abs(a.opp||0) - Math.abs(b.opp||0));
+      if (col === 'net')    return mul * ((a.net||0)      - (b.net||0));
       return 0;
     });
-  }, [chipFiltered, search, sort]);
+  }, [vendors, search, sort]);
 
   function toggleSort(col) {
     setSort(s => s.col === col ? { col, dir: s.dir==='desc'?'asc':'desc' } : { col, dir:'desc' });
   }
 
-  const CHIPS = [
-    { key:'all',  label:'All' },
-    { key:'risk', label:'Risk' },
-    { key:'opp',  label:'Opportunity' },
-    { key:'over', label:'Over budget' },
-  ];
 
   return (
     <div className="card" style={{ padding:0, overflow:'hidden' }}>
@@ -488,9 +499,23 @@ function VendorTable({ vendors, onSelect, selected }) {
             <span style={{ fontFamily:'var(--font-serif)', fontSize:16, fontWeight:700, color:'#1A1F3C' }}>All Vendors</span>
             <span style={{ fontSize:11, color:'#9E9B97', marginLeft:10 }}>Click any row for full detail</span>
           </div>
-          <span style={{ fontSize:11, color:'#9E9B97', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>
-            {rows.length}{rows.length !== vendors.length ? ` of ${vendors.length}` : ''} vendors
-          </span>
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
+            <span style={{ fontSize:11, color:'#9E9B97', fontVariantNumeric:'tabular-nums' }}>
+              {rows.length}{rows.length !== vendors.length ? ` of ${vendors.length}` : ''} vendors
+            </span>
+            <ExportBtn onClick={() => xlsxExport(rows.map(v => ({
+              'Vendor': v.vendor,
+              'Domain': (v.domains||[]).join('; '),
+              'Domain Owner': (v.domainOwners||[]).join('; '),
+              'Category': v.cat || '',
+              'Budget': v.budget,
+              'Actuals': v.actual,
+              'Forecast': v.forecast,
+              'Risk': v.risk,
+              'Opportunity': v.opp,
+              'Net Risk/(Opp)': v.net,
+            })), 'Vendors')} />
+          </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
           <div className="search-box" style={{ minWidth:200 }}>
@@ -505,11 +530,6 @@ function VendorTable({ vendors, onSelect, selected }) {
               <button onClick={() => setSearch('')} style={{ background:'none', border:'none', cursor:'pointer', color:'#9E9B97', padding:'0 2px', fontSize:14, lineHeight:1, display:'flex', alignItems:'center' }}>×</button>
             )}
           </div>
-          <div className="chips">
-            {CHIPS.map(c => (
-              <button key={c.key} className={`chip${chip===c.key?' active':''}`} onClick={() => setChip(c.key)}>{c.label}</button>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -523,6 +543,7 @@ function VendorTable({ vendors, onSelect, selected }) {
                   key={col.key}
                   className={`${col.cls}${col.sort?' sortable':''}`}
                   style={{ cursor:col.sort?'pointer':'default', background:'#FAFAF8', whiteSpace:'nowrap' }}
+                  title={col.tooltip || undefined}
                   onClick={() => col.sort && toggleSort(col.key)}
                 >
                   {col.label}{col.sort && <SortArrow col={col.key} sort={sort} />}
@@ -552,25 +573,26 @@ function VendorTable({ vendors, onSelect, selected }) {
                     </div>
                   </td>
                   {/* Category */}
-                  <td style={{ color:'#807E7A', fontSize:12, whiteSpace:'nowrap', maxWidth:140, overflow:'hidden', textOverflow:'ellipsis' }} title={cat}>{cat}</td>
-                  {/* Year-End FC */}
+                  <td style={{ fontSize:12, whiteSpace:'nowrap', maxWidth:140, overflow:'hidden', textOverflow:'ellipsis' }} title={cat}>{cat}</td>
+                  {/* Budget */}
+                  <td className="num">{v.budget>0?fmt.k(v.budget):<span style={{color:'#D8D6D2'}}>—</span>}</td>
+                  {/* Actuals */}
+                  <td className="num">{v.actual>0?fmt.k(v.actual):<span style={{color:'#D8D6D2'}}>—</span>}</td>
+                  {/* Forecast (remaining) */}
+                  <td className="num"><span style={{ fontWeight:600 }}>{fmt.k(v.forecast - v.actual)}</span></td>
+                  {/* Act + FC */}
+                  <td className="num" style={{ fontWeight:700, color:'#1A1F3C' }}>{fmt.k(v.forecast)}</td>
+                  {/* Risk */}
+                  <td className="num" style={{ color:(v.risk||0)>100?'#C03A3A':'#D8D6D2' }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
+                  {/* Opportunity */}
+                  <td className="num" style={{ color:(v.opp||0)<-100?'#1F7A4D':'#D8D6D2' }}>{(v.opp||0)<-100?fmt.k(Math.abs(v.opp)):'—'}</td>
+                  {/* Net Risk/(Opp) */}
                   <td className="num">
-                    <span style={{ fontWeight:700, color:'#1A1F3C', fontSize:13 }}>{fmt.k(v.forecast)}</span>
-                  </td>
-                  {/* vs Budget bar */}
-                  <td style={{ minWidth:100 }}>
-                    <BudgetBar actual={v.actual} forecast={v.forecast} budget={v.budget} />
-                  </td>
-                  {/* Net Position */}
-                  <td className="num">
-                    {Math.abs(v.net) > 100
+                    {Math.abs(v.net)>100
                       ? <span style={{ color:v.net>0?'#C03A3A':'#1F7A4D', fontWeight:700 }}>{fmt.signed(v.net)}</span>
-                      : <span style={{ color:'#D8D6D2' }}>—</span>}
+                      : <span style={{color:'#D8D6D2'}}>—</span>}
                   </td>
-                  {/* Sparkline */}
-                  <td>
-                    <Sparkline ac={v.monthlyAC||[]} fc={synthMonthlyFC(v.monthlyAC, v.monthlyFC, v.forecast)} height={24} width={80} />
-                  </td>
+
                 </tr>
               );
             })}
@@ -585,10 +607,18 @@ function VendorTable({ vendors, onSelect, selected }) {
         </table>
       </div>
 
-      {/* Inline detail */}
-      <div ref={detailRef}>
-        {selected && <VendorDetail vendor={selected} onClose={() => onSelect(null)} />}
-      </div>
+      {/* Side panel detail */}
+      {selected && (
+        <div className="drill-overlay" onClick={() => onSelect(null)}
+          style={{ alignItems:'flex-start', justifyContent:'center', overflowY:'auto', padding:'24px 0' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width:'92vw', background:'#FAFAF8', borderRadius:8, overflow:'hidden',
+              boxShadow:'0 8px 48px rgba(28,33,63,0.22)', animation:'slidein 0.25s cubic-bezier(0.2,0,0.2,1)',
+              margin:'auto' }}>
+            <VendorDetail vendor={selected} onClose={() => onSelect(null)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -655,9 +685,41 @@ function VendorsTab({ data }) {
     return base.filter(v => flt.vendors.includes(v.vendor));
   }, [vendors, flt.vendors]);
 
+  // Always derive selected vendor fresh from realVendors — prevents stale data after upload
+  const currentVendor = useMemoV(() => {
+    if (!selected) return null;
+    return realVendors.find(v => v.vendor === selected.vendor) || null;
+  }, [realVendors, selected?.vendor]);
+
+  // Clear selection if vendor disappears after filter/upload
   useEffectV(() => {
     if (selected && !realVendors.find(v => v.vendor === selected.vendor)) setSelected(null);
   }, [realVendors]);
+
+  // Debug logging — fires whenever active workbook data changes
+  useEffectV(() => {
+    const lineItems = data.lineItems || [];
+    const notesMatched = lineItems.filter(li => li.notesRO && li.notesRO.length > 0).length;
+    const totalBudget   = realVendors.reduce((s, v) => s + (v.budget||0), 0);
+    const totalForecast = realVendors.reduce((s, v) => s + (v.forecast||0), 0);
+    const totalRisk     = realVendors.reduce((s, v) => s + (v.risk||0), 0);
+    const totalOpp      = realVendors.reduce((s, v) => s + (v.opp||0), 0);
+    const totalNet      = realVendors.reduce((s, v) => s + (v.net||0), 0);
+    console.log('[vendors] active lineItems count:', lineItems.length);
+    console.log('[vendors] vendor count:', realVendors.length);
+    console.log('[vendors] EXCLUDED vendors:', allVendors.filter(v => !isRealVendor(v.vendor)).map(v => v.vendor));
+    console.log('[vendors] total budget=$'+Math.round(totalBudget/1e3)+'K forecast=$'+Math.round(totalForecast/1e3)+'K risk=$'+Math.round(totalRisk/1e3)+'K opp=$'+Math.round(Math.abs(totalOpp)/1e3)+'K net=$'+Math.round(totalNet/1e3)+'K');
+    console.log('[vendors] notes matched:', notesMatched, 'of', lineItems.length, 'line items');
+  }, [realVendors, data.lineItems]);
+
+  useEffectV(() => {
+    if (!currentVendor) return;
+    const li = currentVendor.lineItems || [];
+    const budget   = li.reduce((s, x) => s + (x.budget||0), 0);
+    const forecast = li.reduce((s, x) => s + (x.forecast||0), 0);
+    const net      = li.reduce((s, x) => s + (x.net||0), 0);
+    console.log('[vendors] selected vendor:', currentVendor.vendor, '| lineItems:', li.length, '| budget=$'+Math.round(budget/1e3)+'K forecast=$'+Math.round(forecast/1e3)+'K net=$'+Math.round(net/1e3)+'K');
+  }, [currentVendor]);
 
   const OvFD = window.OvFilterDrop;
 
@@ -683,7 +745,284 @@ function VendorsTab({ data }) {
       </div>
 
       <VendorKPIs vendors={realVendors} />
-      <VendorTable vendors={realVendors} onSelect={setSelected} selected={selected} />
+      <VendorTable vendors={realVendors} onSelect={setSelected} selected={currentVendor} />
+
+      {/* ── Budget vs Actuals vs Remaining Forecast chart ── */}
+      <div style={{ marginTop: 20 }}>
+        <VendorBudgetActualsChart vendors={realVendors} onSelect={setSelected} />
+      </div>
+
+      {/* ── YTD Risks & Opportunities chart ── */}
+      <div style={{ marginTop: 0 }}>
+        <VendorRisksOppsChart vendors={realVendors} onSelect={setSelected} />
+      </div>
+
+    </div>
+  );
+}
+
+// ── YTD Risks & Opportunities by Vendor ─────────────────────────────────
+function VendorRisksOppsChart({ vendors, n = 10, onSelect }) {
+  const [hoveredVendor, setHoveredVendor] = useStateV(null);
+
+  const top = useMemoV(() => {
+    return [...vendors]
+      .filter(v => isRealVendor(v.vendor) && (Math.abs(v.risk || 0) > 100 || Math.abs(v.opp || 0) > 100))
+      .sort((a, b) => (b.net || 0) - (a.net || 0))
+      .slice(0, n);
+  }, [vendors, n]);
+
+  const max = useMemoV(() =>
+    Math.max(...top.map(v => Math.max(v.risk || 0, Math.abs(v.opp || 0))), 1)
+  , [top]);
+
+  if (top.length === 0) return null;
+
+  return (
+    <div className="card" style={{ padding: '24px 28px', marginBottom: 20 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 700, color: '#1A1F3C', marginBottom: 3 }}>
+            YTD Risks &amp; Opportunities by Vendor
+          </div>
+          <div style={{ fontSize: 11, color: '#9E9B97' }}>Net risk/opportunity by vendor · sorted by net descending</div>
+        </div>
+        <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#807E7A', flexShrink: 0, alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 12, height: 10, background: '#C03A3A', display: 'inline-block', borderRadius: 1 }}></span>
+            risk (unfavorable)
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 12, height: 10, background: '#1F7A4D', display: 'inline-block', borderRadius: 1 }}></span>
+            opp (favorable)
+          </span>
+        </div>
+      </div>
+
+      {/* Axis labels */}
+      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 110px', gap: 12, marginBottom: 4 }}>
+        <div />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', fontSize: 10, color: '#B0ADA9', marginLeft: 48 }}>
+          <span style={{ textAlign: 'right', paddingRight: 8 }}>← unfavorable (risk)</span>
+          <span style={{ textAlign: 'left', paddingLeft: 8 }}>favorable (opp) →</span>
+        </div>
+        <div />
+      </div>
+
+      {/* Rows */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {top.map((v, i) => {
+          const risk = v.risk || 0;
+          const opp  = Math.abs(v.opp || 0);
+          const net  = v.net || 0;
+          const riskPct = max > 0 ? (risk / max) * 100 : 0;
+          const oppPct  = max > 0 ? (opp  / max) * 100 : 0;
+          const netIsRisk = net > 100;
+          const netIsOpp  = net < -100;
+
+          return (
+            <div
+              key={v.vendor}
+              onClick={() => onSelect && onSelect(v)}
+              onMouseEnter={() => setHoveredVendor(v.vendor)}
+              onMouseLeave={() => setHoveredVendor(null)}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '180px 1fr 110px',
+                alignItems: 'center',
+                gap: 12,
+                padding: '8px 8px',
+                borderBottom: i < top.length - 1 ? '1px solid #F2F0EE' : 'none',
+                cursor: onSelect ? 'pointer' : 'default',
+                borderRadius: 4,
+                background: hoveredVendor === v.vendor ? '#F4F6FF' : 'transparent',
+                transition: 'background 0.12s',
+              }}
+            >
+              {/* Vendor name */}
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1F3C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vendor}>
+                {v.vendor}
+              </span>
+
+              {/* Diverging bars */}
+              <div style={{ display: 'grid', gridTemplateColumns: '44px calc(50% + 4px) calc(50% - 48px) 44px', gap: 0, alignItems: 'center', height: 28 }}>
+                {/* Risk label */}
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#C03A3A', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', textAlign: 'right', paddingRight: 4, opacity: risk > 100 ? 1 : 0 }}>{risk > 100 ? fmt.k(risk) : ''}</span>
+                {/* Risk bar (right-aligned) */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', height: 28, paddingRight: 1 }}>
+                  {risk > 100 && <div style={{ width: `${riskPct}%`, height: 20, background: '#C03A3A', borderRadius: '3px 0 0 3px', flexShrink: 0 }} />}
+                </div>
+                {/* Opp bar (left-aligned) */}
+                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', height: 28, paddingLeft: 1, borderLeft: '1px solid #D0CEC8' }}>
+                  {opp > 100 && <div style={{ width: `${oppPct}%`, height: 20, background: '#1F7A4D', borderRadius: '0 3px 3px 0', flexShrink: 0 }} />}
+                </div>
+                {/* Opp label */}
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#1F7A4D', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', paddingLeft: 4, opacity: opp > 100 ? 1 : 0 }}>{opp > 100 ? fmt.k(opp) : ''}</span>
+              </div>
+
+              {/* Net value */}
+              <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 10, color: '#B0ADA9', marginRight: 3 }}>Net</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: netIsRisk ? '#C03A3A' : netIsOpp ? '#1F7A4D' : '#9E9B97', fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.abs(net) > 100 ? fmt.signed2(net) : '—'}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Center $0 label */}
+      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 110px', gap: 12, marginTop: 6 }}>
+        <div />
+        <div style={{ position: 'relative', fontSize: 10, color: '#B0ADA9' }}>
+          <span style={{ position: 'absolute', left: 'calc(50% + 48px)', transform: 'translateX(-50%)' }}>$0</span>
+        </div>
+        <div />
+      </div>
+    </div>
+  );
+}
+
+// ── Annual Budget vs YTD Actuals vs Remaining Forecast – Top 10 ──────────
+function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
+  const [hoveredVendor, setHoveredVendor] = useStateV(null);
+  const top = useMemoV(() => {
+    return [...vendors]
+      .filter(v => isRealVendor(v.vendor))
+      .sort((a, b) => (b.budget || 0) - (a.budget || 0))
+      .slice(0, n);
+  }, [vendors, n]);
+
+  const max = top[0] ? (top[0].budget || 0) : 1;
+
+  const SERIES = [
+    { key: 'budget',    label: 'annual budget',       color: '#333C66' },
+    { key: 'actuals',   label: 'ytd actuals spend',   color: '#6699FF' },
+    { key: 'remaining', label: 'remaining forecast',  color: '#E8873A' },
+  ];
+
+  return (
+    <div className="card" style={{ padding: '24px 28px', marginBottom: 20 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 700, color: '#1A1F3C', marginBottom: 3 }}>
+            Annual Budget vs YTD Actuals Spend vs Remaining Forecast – Top 10 Vendors
+          </div>
+          <div style={{ fontSize: 11, color: '#9E9B97' }}>Top 10 vendors ranked by Annual Budget · descending</div>
+        </div>
+        <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#807E7A', flexShrink: 0, alignItems: 'center' }}>
+          {SERIES.map(s => (
+            <span key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 12, height: 10, background: s.color, display: 'inline-block', borderRadius: 1 }}></span>
+              {s.label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Rows */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {top.map((v, i) => {
+          const budget    = v.budget || 0;
+          const actuals   = v.actual || 0;
+          const remaining = Math.max(0, (v.forecast || 0) - actuals);
+          const vals      = [budget, actuals, remaining];
+
+          return (
+            <div
+              key={v.vendor}
+              onClick={() => onSelect && onSelect(v)}
+              onMouseEnter={() => setHoveredVendor(v.vendor)}
+              onMouseLeave={() => setHoveredVendor(null)}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '190px 1fr 170px',
+                alignItems: 'center',
+                gap: 16,
+                padding: '10px 8px',
+                borderBottom: i < top.length - 1 ? '1px solid #F2F0EE' : 'none',
+                cursor: onSelect ? 'pointer' : 'default',
+                borderRadius: 4,
+                background: hoveredVendor === v.vendor ? '#F4F6FF' : 'transparent',
+                transition: 'background 0.12s',
+              }}>
+              {/* Vendor name */}
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1F3C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vendor}>
+                {v.vendor}
+              </span>
+
+              {/* Bars */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {SERIES.map((s, si) => {
+                  const pct = max > 0 ? Math.min((vals[si] / max) * 100, 100) : 0;
+                  return (
+                    <div key={s.key} style={{ height: 10, background: '#EDECEA', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: s.color, borderRadius: 2, transition: 'width 0.3s ease' }} />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Values */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
+                {SERIES.map((s, si) => (
+                  <span key={s.key} style={{ fontSize: 11, fontWeight: 700, color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
+                    {fmt.m2(vals[si])}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Top Vendors ranked bar chart ─────────────────────────────────────────
+function VendorRankChart({ vendors, sortKey, title, subtitle, n = 10 }) {
+  const top = useMemoV(() => {
+    return [...vendors]
+      .filter(v => isRealVendor(v.vendor))
+      .sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0))
+      .slice(0, n);
+  }, [vendors, sortKey, n]);
+
+  const max = top[0] ? (top[0][sortKey] || 0) : 1;
+
+  return (
+    <div className="card" style={{ padding:'24px 28px', flex:'1 1 0', minWidth:0 }}>
+      <div style={{ marginBottom:20 }}>
+        <div style={{ fontFamily:'var(--font-serif)', fontSize:16, fontWeight:700, color:'#1A1F3C', marginBottom:3 }}>{title}</div>
+        <div style={{ fontSize:11, color:'#9E9B97' }}>{subtitle}</div>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+        {top.map((v, i) => {
+          const val = v[sortKey] || 0;
+          const pct = max > 0 ? (val / max) * 100 : 0;
+          return (
+            <div key={v.vendor} style={{ display:'grid', gridTemplateColumns:'32px 1fr auto', alignItems:'center', gap:12, padding:'9px 0', borderBottom: i < top.length-1 ? '1px solid #F2F0EE' : 'none' }}>
+              <span style={{ fontSize:11, color:'#C8C6C0', fontWeight:700, fontVariantNumeric:'tabular-nums', letterSpacing:'0.04em' }}>
+                {String(i+1).padStart(2,'0')}
+              </span>
+              <div style={{ display:'grid', gridTemplateColumns:'160px 1fr', alignItems:'center', gap:10 }}>
+                <span style={{ fontSize:12, fontWeight:500, color:'#1A1F3C', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }} title={v.vendor}>
+                  {v.vendor}
+                </span>
+                <div style={{ height:8, background:'#EDECEA', borderRadius:2, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${pct}%`, background:'#333C66', borderRadius:2, transition:'width 0.3s ease' }} />
+                </div>
+              </div>
+              <span style={{ fontSize:12, fontWeight:700, color:'#1A1F3C', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', minWidth:52, textAlign:'right' }}>
+                {fmt.m2(val)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

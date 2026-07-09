@@ -39,17 +39,40 @@ function OvEyebrow({ text, light }) {
 // ── OvFilterDrop — compact multi-select dropdown ──────────────────────────
 function OvFilterDrop({ label, options, value, onChange }) {
   const [open, setOpen] = useStateOV(false);
+  const [noneMode, setNoneMode] = useStateOV(false);
   const ref = useRefOV(null);
+
+  function closeDropdown() { setOpen(false); setNoneMode(false); }
 
   useEffectOV(() => {
     if (!open) return;
-    function onDown(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    function onDown(e) { if (ref.current && !ref.current.contains(e.target)) closeDropdown(); }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  const active = value.length > 0;
-  const toggle = v => onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v]);
+  // Reset noneMode whenever value is cleared externally (e.g. "Clear all" button)
+  useEffectOV(() => { if (value.length > 0) setNoneMode(false); }, [value.length]);
+
+  const isAll = value.length === 0 && !noneMode;
+  const allChecked = isAll;
+  const isFiltered = noneMode || value.length > 0;
+
+  function handleAll() {
+    if (noneMode)   { setNoneMode(false); onChange([]); }  // re-check All
+    else if (isAll) { setNoneMode(true);  onChange([]); }  // uncheck All → none
+    else            { setNoneMode(false); onChange([]); }  // partial → clear to All
+  }
+
+  const toggle = v => {
+    if (noneMode) { setNoneMode(false); onChange([v]); return; }  // first pick after none
+    const base = isAll ? options : value;
+    const next = base.includes(v) ? base.filter(x => x !== v) : [...base, v];
+    if (next.length === 0) { setNoneMode(true); onChange([]); }
+    else onChange(next.length === options.length ? [] : next);
+  };
+
+  const isChecked = o => !noneMode && (isAll || value.includes(o));
 
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
@@ -58,15 +81,15 @@ function OvFilterDrop({ label, options, value, onChange }) {
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           padding: '6px 12px',
-          background: active ? OV.navy : '#fff',
-          border: `1px solid ${active ? OV.navy : OV.border}`,
-          color: active ? '#fff' : OV.stone,
+          background: isFiltered ? OV.navy : '#fff',
+          border: `1px solid ${isFiltered ? OV.navy : OV.border}`,
+          color: isFiltered ? '#fff' : OV.stone,
           cursor: 'pointer', fontFamily: OV.sans, fontSize: 12,
-          fontWeight: active ? 600 : 500,
+          fontWeight: isFiltered ? 600 : 500,
           transition: 'all 0.12s',
         }}
       >
-        {active ? `${label} · ${value.length}` : label}
+        {noneMode ? `${label} · 0` : value.length > 0 ? `${label} · ${value.length}` : label}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d={open ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'} />
@@ -84,19 +107,31 @@ function OvFilterDrop({ label, options, value, onChange }) {
               No options available
             </div>
           )}
+          {options.length > 0 && (
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 14px', cursor: 'pointer',
+              background: allChecked ? '#F4F6FF' : 'transparent',
+              borderBottom: `1px solid ${OV.border}`,
+            }}>
+              <input type="checkbox" checked={allChecked} onChange={handleAll}
+                style={{ accentColor: OV.navy, width: 13, height: 13, flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontFamily: OV.sans, color: OV.navy, fontWeight: 700 }}>All</span>
+            </label>
+          )}
           {options.map(opt => (
             <label key={opt} style={{
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '8px 14px', cursor: 'pointer',
-              background: value.includes(opt) ? '#F4F6FF' : 'transparent',
+              background: isChecked(opt) ? '#F4F6FF' : 'transparent',
               transition: 'background 0.1s',
             }}>
-              <input type="checkbox" checked={value.includes(opt)} onChange={() => toggle(opt)}
+              <input type="checkbox" checked={isChecked(opt)} onChange={() => toggle(opt)}
                 style={{ accentColor: OV.navy, width: 13, height: 13, flexShrink: 0 }} />
               <span style={{
                 fontSize: 12, fontFamily: OV.sans,
-                color: value.includes(opt) ? OV.navy : '#3C3A36',
-                fontWeight: value.includes(opt) ? 600 : 400,
+                color: isChecked(opt) ? OV.navy : '#3C3A36',
+                fontWeight: isChecked(opt) ? 600 : 400,
               }}>{opt}</span>
             </label>
           ))}
@@ -336,21 +371,10 @@ function OverviewTab({ data }) {
   // When no filters active: use workbook SUBTOTAL values directly (exact match to source).
   // When filters active: derive from filtered line items.
   const kpi = useMemoOV(() => {
-    // Priority 1: YTD Financials Run Rate Grand Total—matches the user-visible reconciliation page
-    if (!filterActive && data.ytdSummary) {
-      const ys     = data.ytdSummary;
-      const actual = data.workbookSubtotal?.actual ?? data.summary?.actual ?? 0;
-      return {
-        budget:    ys.budget,
-        forecast:  ys.forecast,
-        actual,
-        remaining: ys.forecast - actual,
-        risk:      ys.risk,
-        opp:       ys.absOpp,
-        net:       ys.net,
-      };
-    }
-    // Priority 2: workbookSubtotal (lineItems sum after filtered-SUBTOTAL fallback)
+    // Source: cleaned Master Data lineItems (workbookSubtotal = lineItems sum,
+    // Capitalization excluded, formula-derived/error cells recomputed from
+    // Budget and Forecast in JS).  YTD Financials Run Rate is used only as a
+    // reconciliation control check — it does NOT drive visible KPI values.
     if (!filterActive && data.workbookSubtotal) {
       const ws = data.workbookSubtotal;
       return {
@@ -374,52 +398,30 @@ function OverviewTab({ data }) {
       n += li.net      || 0;
     }
     return { budget: b, forecast: f, actual: a, remaining: f - a, risk: r, opp: Math.abs(o), net: n };
-  }, [items, filterActive, data.workbookSubtotal, data.ytdSummary]);
+  }, [items, filterActive, data.workbookSubtotal]);
 
-  // Back Pocket: computed from full workbook lineItems (not filtered).
+  // Back Pocket: computed from FILTERED lineItems so it respects active filter chips.
   // = |Σ net| where Non-Committed flag = Y / Yes / True / 1 (case-insensitive).
   // Falls back to data.summary.backPocket if lineItems lack the nonCommitted field
   // (e.g. pre-fix localStorage data restored at boot).
   const backPocket = useMemoOV(() => {
-    const src = data.lineItems || [];
+    const src = items; // uses filtered set — changes with domain/owner/category filters
     const isFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
     const flagged = src.filter(li => isFlag(li.nonCommitted));
     const sum     = flagged.reduce((s, li) => s + (li.net || 0), 0);
-    console.log('[overview] backPocket lineItems count', src.length);
-    console.log('[overview] backPocket flagged count',   flagged.length);
-    console.log('[overview] backPocket raw sum',         sum);
-    console.log('[overview] backPocket display',         Math.abs(sum));
-    // If no rows flagged but summary carries a pre-computed value, use it as fallback
-    if (flagged.length === 0 && data.summary && data.summary.backPocket > 0) {
-      console.log('[overview] backPocket using summary.backPocket fallback', data.summary.backPocket);
+    // Fallback only when no filters are active (legacy localStorage data lacking
+    // the nonCommitted field).  When a filter is active and excludes all Non-Committed
+    // rows, return $0 — do NOT fall back to the static parsed value.
+    if (flagged.length === 0 && !filterActive && data.summary && data.summary.backPocket > 0) {
       return data.summary.backPocket;
     }
     return Math.abs(sum);
-  }, [data.lineItems, data.summary]);
+  }, [items, filterActive, data.summary]);
 
   // ── Category aggregation — gross Risk and Opportunity per category ──────
-  // Priority: YTD category rows (consistent with KPI cards).
-  // Fallback: Master Data lineItems aggregation when filtered or YTD unavailable.
-  // Risk bars (red) = positive values from risk column (unfavorable exposure).
-  // Opp bars (green) = abs of negative opp values (favorable upside).
+  // Source: cleaned Master Data lineItems (same source as KPI cards).
+  // Risk bars (red) sum to kpi.risk; Opp bars (green) sum to kpi.opp.
   const cats = useMemoOV(() => {
-    if (!filterActive && data.ytdCategories?.length) {
-      const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return OV_CATS.map(cat => {
-        const ytd = data.ytdCategories.find(c =>
-          c.category === cat ||
-          norm(c.category).startsWith(norm(cat).slice(0, 4))
-        );
-        if (!ytd) return { cat, risk: 0, opp: 0, v: 0 };
-        return {
-          cat,
-          risk: Math.max(0, Math.round(ytd.risk)),   // positive = unfavorable
-          opp:  Math.max(0, Math.round(-ytd.opp)),   // negative opp → positive bar
-          v:    Math.round(ytd.forecast - ytd.budget),
-        };
-      });
-    }
-    // Filtered or YTD unavailable — aggregate from lineItems
     const agg = {};
     for (const li of items) {
       const c = ovCat(li);
@@ -432,7 +434,7 @@ function OverviewTab({ data }) {
       const d = agg[cat] || { risk: 0, opp: 0, net: 0 };
       return { cat, risk: Math.round(d.risk), opp: Math.round(d.opp), v: Math.round(d.net) };
     });
-  }, [items, filterActive, data.ytdCategories]);
+  }, [items]);
 
   const ovMaxBar   = Math.max(...cats.map(c => Math.max(c.risk, c.opp)), 1);
 
@@ -624,7 +626,7 @@ function OverviewTab({ data }) {
         {[
           { label: 'annual budget',      val: fmt.m(kpi.budget),    sub: '2026 approved budget' },
           { label: 'year-end forecast',  val: fmt.m(kpi.forecast),  sub: 'actuals + remaining forecast' },
-          { label: 'back pocket',        val: fmt.m(backPocket),    sub: 'non-committed favorable net position' },
+          { label: 'back pocket',        val: 'TBD',                sub: 'non-committed favorable net position' },
 
         ].map((k, i) => (
           <div key={i} className="kpi-flip" style={{ borderLeft: i > 0 ? `1px solid ${OV.border}` : 'none', height: 128 }}>
@@ -676,7 +678,7 @@ function OverviewTab({ data }) {
           onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.15)'}
           onMouseLeave={e => e.currentTarget.style.filter = 'none'}
         >
-          <OvEyebrow text="net opp/risk position" light />
+          <OvEyebrow text="net risk/(opportunity)" light />
           <div style={{
             fontFamily: OV.serif, fontWeight: 600, fontSize: 36, lineHeight: 1,
             letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums',

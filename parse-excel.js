@@ -417,6 +417,7 @@
         opp: _liOpp,
         net: _liNet,
         notes: str(rec.notes) || '',
+        notesRO: '',
         monthlyAC: readArr(row, colIdx, MONTHS_AC),
         monthlyFC: readArr(row, colIdx, MONTHS_FC),
         monthlyOR: readArr(row, colIdx, resolvedOR),
@@ -426,6 +427,70 @@
       };
       lineItems.push(lineItem);
       rowCount++;
+    }
+
+    // ── Notes - R&O sheet: build lookup and attach to line items ──────────
+    const roSheetName = wb.SheetNames.find(n => /notes.*r.?o/i.test(n) || /r.?o.*notes/i.test(n));
+    // vendorCatNotes: vendor → [{category, note}] ordered as in the Notes sheet
+    const vendorCatNotes = new Map();
+
+    if (roSheetName) {
+      try {
+        const roWs   = wb.Sheets[roSheetName];
+        const roRows = XLSX.utils.sheet_to_json(roWs, { header: 1, defval: null, raw: false });
+
+        // Detect header row to find optional category column
+        const hdr = (roRows[0] || []).map(h => str(h).toLowerCase());
+        const catColIdx = hdr.findIndex(h => h.includes('category') || h === 'cat');
+        console.log('[parse] Notes - R&O header cols:', hdr.slice(0, 12), '→ category col idx:', catColIdx);
+
+        const roMapVC = new Map(); // vendor|category → note  (preferred)
+        const roMapV  = new Map(); // vendor → note           (fallback)
+
+        for (let ri = 1; ri < roRows.length; ri++) {
+          const r      = roRows[ri] || [];
+          const owner  = str(r[1]);
+          const vendor = str(r[2]);
+          const cat    = catColIdx >= 0 ? str(r[catColIdx]) : '';
+          const notes  = str(r[8]);
+          if (!vendor || !notes) continue;
+          if (/total$/i.test(owner) || /^values$/i.test(owner)) continue;
+          if (/^(dark|light)\s+(green|red)/i.test(notes)) continue;
+          const k1 = vendor.toLowerCase();
+          if (!roMapV.has(k1)) roMapV.set(k1, notes);
+          if (cat) {
+            roMapVC.set(`${k1}|${cat.toLowerCase()}`, notes);
+            // Build per-vendor category list (preserves Notes sheet order)
+            if (!vendorCatNotes.has(k1)) vendorCatNotes.set(k1, []);
+            const vcList = vendorCatNotes.get(k1);
+            if (!vcList.find(x => x.category.toLowerCase() === cat.toLowerCase())) {
+              vcList.push({ category: cat, note: notes });
+            }
+          }
+        }
+        for (const li of lineItems) {
+          const k1  = li.vendor.toLowerCase();
+          const vcList = vendorCatNotes.get(k1);
+          // Try to find the Notes spend category that best matches this line item
+          let matchedCat = null;
+          if (vcList && vcList.length) {
+            const sub   = (li.subCategory   || '').toLowerCase().replace(/[^\w]/g, '');
+            const cont  = (li.contractType  || '').toLowerCase().replace(/[^\w]/g, '');
+            const isLabor = (li.category || '').toLowerCase() === 'labor';
+            for (const { category: nc } of vcList) {
+              const ncN = nc.toLowerCase().replace(/[^\w]/g, '');
+              if (sub  && (ncN === sub  || ncN.includes(sub)  || sub.includes(ncN)))  { matchedCat = nc; break; }
+              if (cont && (ncN === cont || ncN.includes(cont) || cont.includes(ncN))) { matchedCat = nc; break; }
+              if (isLabor && (ncN.includes('labor') || ncN.includes('tm') || ncN.includes('t&m'))) { matchedCat = nc; break; }
+            }
+          }
+          li.spendCategory = matchedCat || li.subCategory || li.category;
+          li.notesRO = (matchedCat && roMapVC.get(`${k1}|${matchedCat.toLowerCase()}`)) || roMapV.get(k1) || '';
+        }
+        console.log('[parse] Notes - R&O:', roMapVC.size, 'category-level +', roMapV.size, 'vendor-level entries');
+      } catch(e) {
+        console.warn('[parse] Notes - R&O parse failed:', e.message);
+      }
     }
 
     // ── Error / recompute summary ─────────────────────────────────────────
@@ -441,10 +506,14 @@
     }
 
     // ── When filtered SUBTOTAL was detected (workbookSubtotal=null), build from lineItems ──
+    // Mark as lineItems-sourced so the cap-exclusion block below can skip it
+    // (lineItems already exclude Capitalization rows — no double-subtraction).
+    let _wbsFromLineItems = false;
     if (!workbookSubtotal && lineItems.length) {
       let _lb=0,_lf=0,_la=0,_lr=0,_lo=0,_ln=0;
       for (const li of lineItems) { _lb+=li.budget||0; _lf+=li.forecast||0; _la+=li.actual||0; _lr+=li.risk||0; _lo+=li.opp||0; _ln+=li.net||0; }
       workbookSubtotal = { budget:_lb, forecast:_lf, actual:_la, remaining:_lf-_la, risk:_lr, opp:_lo, net:_ln, absOpp:Math.abs(_lo) };
+      _wbsFromLineItems = true;
       console.log('[parse] KPI from lineItems (filtered-SUBTOTAL path): budget=$'+Math.round(_lb/1e3)+'K forecast=$'+Math.round(_lf/1e3)+'K risk=$'+Math.round(_lr/1e3)+'K');
     }
 
@@ -516,7 +585,7 @@
       throw new Error('No data rows parsed. Check that the Master Data sheet has rows below the header.');
     }
 
-    const _result = buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd);
+    const _result = buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd, vendorCatNotes);
     const _s = _result.summary;
     const _ws = _result.workbookSubtotal;
     if (_ws) {
@@ -672,7 +741,7 @@
 
   function uniq(arr) { return [...new Set(arr.filter(x => x !== '' && x != null))].sort(); }
 
-  function buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd) {
+  function buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd, vendorCatNotes = new Map()) {
     // Summary
     const summary = lineItems.reduce((s, x) => ({
       budget: s.budget + x.budget,
@@ -713,7 +782,15 @@
       b.lineItems.push(li);
     }
     const vendors = Object.values(byV)
-      .map(v => ({ ...v, domains: [...v.domains], domainOwners: [...v.domainOwners] }))
+      .map(v => {
+        const catNotes = vendorCatNotes.get(v.vendor.toLowerCase());
+        return {
+          ...v,
+          domains: [...v.domains],
+          domainOwners: [...v.domainOwners],
+          ...(catNotes && catNotes.length ? { categoryNotes: catNotes } : {}),
+        };
+      })
       .sort((a, b) => b.actual - a.actual);
 
     // Aggregate by domain owner

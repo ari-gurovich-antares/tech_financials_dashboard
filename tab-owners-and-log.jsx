@@ -28,10 +28,15 @@ function DomainOwnersTab({ data }) {
             <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#B23A3A',display:'inline-block'}}/>risk</span>
             <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#2F7A4D',display:'inline-block'}}/>opp</span>
           </div>
+          <ExportBtn onClick={() => xlsxExport(owners.map(o => ({
+            'Domain Owner': o.owner,
+            'Domains': (o.domains||[]).join('; '),
+            'Vendors': (o.vendors||[]).join('; '),
+            'Budget': o.budget, 'Actuals': o.actual, 'Forecast': o.forecast,
+            'Risk': o.risk, 'Opportunity': o.opp, 'Net': o.net,
+          })), 'Domain Owners')} />
         </div>
       </div>
-
-      {/* Owner cards grid — 4 KPIs each + budget bar + R&O bar */}
       <div className="owner-grid">
         {owners.map(o => {
           const remaining = o.budget - o.actual;
@@ -403,6 +408,14 @@ function RiskOppLogTab({ data }) {
               <input type="text" placeholder="Search items, notes…" value={search} onChange={e=>setSearch(e.target.value)} />
             </div>
           </div>
+          <ExportBtn onClick={() => xlsxExport(items.map(x => ({
+            'Vendor': x.vendor, 'Domain': x.domain, 'Owner': x.owner,
+            'Project': x.project, 'Application': x.application,
+            'Category': x.category, 'Sub-Category': x.subCategory,
+            'Budget': x.budget, 'Forecast': x.forecast,
+            'Risk': x.risk, 'Opportunity': x.opp, 'Net': x.net,
+            'Notes': x.notesRO || x.notes || '',
+          })), `Risk & Opp Log`)} />
         </div>
         <div style={{overflowX:'auto'}}>
           <table className="tbl tbl-clickable">

@@ -122,4 +122,28 @@ function Donut({ items, size = 140, thickness = 22 }) {
   );
 }
 
-Object.assign(window, { fmt, OWNER_ROLES, Icon, Sparkline, Donut });
+// Global single-sheet XLSX export helper
+function xlsxExport(rows, filename) {
+  if (typeof XLSX === 'undefined') { alert('SheetJS not loaded — please refresh.'); return; }
+  if (!rows || !rows.length) { alert('No data to export.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Export');
+  XLSX.writeFile(wb, filename.endsWith('.xlsx') ? filename : filename + '.xlsx');
+}
+
+// Small inline export button for table headers
+function ExportBtn({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Export to Excel"
+      style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', background:'#F5F3F0', border:'1px solid #EDECEA', borderRadius:4, cursor:'pointer', fontSize:11, fontWeight:600, color:'#807E7A', fontFamily:'var(--font-sans)' }}
+      onMouseEnter={e => e.currentTarget.style.background='#EDECEA'}
+      onMouseLeave={e => e.currentTarget.style.background='#F5F3F0'}
+    >
+      <Icon name="download" size={11} color="#807E7A" /> Export
+    </button>
+  );
+}
+
+Object.assign(window, { fmt, OWNER_ROLES, Icon, Sparkline, Donut, xlsxExport, ExportBtn });
