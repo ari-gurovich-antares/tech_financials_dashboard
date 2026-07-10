@@ -1,1081 +1,1092 @@
-// Vendors tab — lean table + rich drilldown
-const { useState: useStateV, useMemo: useMemoV, useRef: useRefV, useEffect: useEffectV } = React;
+// tab-overview.jsx — Executive Overview v4
+// Row 0: Filter bar  |  Row 1: 4 Primary KPIs  |  Row 2: 3 Risk/Opp/Net
+// Row 3: Executive Bridge (full-width)  |  Row 4: Category Variance + Drill
 
-const VD_CATS = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'FPC'];
-function vdCat(li) {
+const { useState: useStateOV, useMemo: useMemoOV, useRef: useRefOV, useEffect: useEffectOV } = React;
+
+// ── Design tokens ─────────────────────────────────────────────────────────
+const OV = {
+  navy:   '#333C66',
+  red:    '#B23A3A',
+  green:  '#2F7A4D',
+  stone:  '#807E7A',
+  border: '#ECEAE7',
+  bg:     '#FAFAF8',
+  serif:  "'Source Serif 4', Georgia, serif",
+  sans:   "'Inter', Arial, sans-serif",
+};
+
+const OV_CATS = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'FPC'];
+
+// Group by Sub-Category1 — this matches the YTD Financials Run Rate pivot grouping.
+// All rows (including Amortization TX type) are grouped by their Sub-Category1 value.
+function ovCat(li) {
   return li.subCategory || li.category || '(Other)';
 }
 
-const NON_VENDOR_PATTERNS = [
-  /^amortization/i, /^multiple$/i, /^amortization\/multiple$/i,
-  /^n\/a$/i, /^other$/i, /^2026 ph$/i, /^ph\s*-\s*other$/i, /^ph\s*-\s*tbc$/i,
-  /^software capitalization/i,
-  /^t&e\s*-/i, /^general office expense/i,
-  /^\s*$/,
-];
-function isRealVendor(name) {
-  if (!name) return false;
-  return !NON_VENDOR_PATTERNS.some(r => r.test(name.trim()));
-}
-
-function vendorStatus(v) {
-  if (v.net > 100)                             return { key:'risk', label:'Risk',         color:'#C03A3A', bg:'#FDF0F0', light:'#FEF6F6' };
-  if (v.net < -100)                            return { key:'opp',  label:'Opportunity',  color:'#1F7A4D', bg:'#EFF7F3', light:'#F4FAF7' };
-  if (v.forecast > v.budget && v.budget > 0)  return { key:'over', label:'Over Budget',  color:'#96600A', bg:'#FDF5E6', light:'#FFFAF0' };
-  return                                              { key:'ok',   label:'On Track',     color:'#3A5A8A', bg:'#EEF3FA', light:'#F5F8FD' };
-}
-
-// Synthesize monthly FC for display when monthly columns are blank
-function synthMonthlyFC(monthlyAC, monthlyFC, totalForecast) {
-  const fcSum = (monthlyFC || []).reduce((s, x) => s + x, 0);
-  if (fcSum > 0) return monthlyFC; // real data — use it
-  const acSum = (monthlyAC || []).reduce((s, x) => s + x, 0);
-  const actCnt = (monthlyAC || []).filter(x => x > 0).length;
-  const remaining = (totalForecast || 0) - acSum;
-  if (remaining <= 0 || actCnt >= 12) return monthlyFC;
-  const remMonths = 12 - actCnt;
-  const perMonth = remaining / remMonths;
-  return (monthlyFC || []).map((_, i) => i >= actCnt ? perMonth : 0);
-}
-
-function vendorDomCat(v) {
-  const tally = {};
-  (v.lineItems || []).forEach(li => {
-    const c = li.subCategory || li.category || 'Other';
-    const fc = (li.monthlyFC || []).reduce((s, x) => s + x, 0);
-    tally[c] = (tally[c] || 0) + fc;
-  });
-  const top = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
-  return top ? top[0] : '—';
-}
-
-// ── KPI Cards ────────────────────────────────────────────────────────────
-function VendorKPIs({ vendors }) {
-  const [hovered, setHovered] = useStateV(-1);
-  const totalBudget   = vendors.reduce((s, v) => s + (v.budget || 0), 0);
-  const totalForecast = vendors.reduce((s, v) => s + (v.forecast || 0), 0);
-  const totalNet      = vendors.reduce((s, v) => s + (v.net || 0), 0);
-  const netIsRisk     = totalNet > 100;
-  const netIsOpp      = totalNet < -100;
-  const netColor      = netIsRisk ? '#C03A3A' : netIsOpp ? '#1F7A4D' : '#9E9B97';
-
-  const cards = [
-    {
-      label: 'annual budget',
-      value: fmt.m2(totalBudget),
-      sub: `${vendors.length} active vendors · 2026 approved budget`,
-      valueColor: '#333C66',
-    },
-    {
-      label: 'year-end forecast',
-      value: fmt.m2(totalForecast),
-      sub: 'Full-year projected spend · actuals + remaining forecast',
-      valueColor: '#333C66',
-    },
-    {
-      label: 'net risk / (opportunity)',
-      value: Math.abs(totalNet) > 100 ? fmt.signed2(totalNet) : '—',
-      sub: 'Sum of all vendor risk and opportunity positions. Positive = net risk.\nNegative = net opportunity.',
-      valueColor: netColor,
-      tooltip: 'Sum of risk and opportunity positions.\nPositive = net risk. Negative = net opportunity.',
-    },
-  ];
-
-  const eyebrow = label => (
+// ── OvEyebrow ─────────────────────────────────────────────────────────────
+function OvEyebrow({ text, light }) {
+  return (
     <div style={{
-      fontFamily: 'var(--font-serif)', fontWeight: 800, fontSize: 10,
+      fontFamily: OV.serif, fontWeight: 800, fontSize: 10,
       letterSpacing: '0.22em', textTransform: 'lowercase',
-      color: '#9E9B97', marginBottom: 10,
-    }}>{label}</div>
-  );
-
-  return (
-    <>
-      <style>{`
-        .vkpi-flip { position: relative; cursor: default; }
-        .vkpi-front { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; transition: opacity 0.25s; }
-        .vkpi-back  { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; background: #333C66; opacity: 0; transition: opacity 0.25s; }
-        .vkpi-flip:hover .vkpi-back  { opacity: 1; }
-        .vkpi-flip:hover .vkpi-front { opacity: 0; }
-      `}</style>
-      <div className="card" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', overflow:'hidden', padding:0, maxWidth:1050, margin:'0 auto 20px' }}>
-        {cards.map((c, i) => (
-          <div key={i} className="vkpi-flip" title={c.tooltip || undefined} style={{ borderLeft: i > 0 ? '1px solid #EDECEA' : 'none', height: 128 }}>
-            <div className="vkpi-front">
-              {eyebrow(c.label)}
-              <div style={{ fontFamily:'var(--font-serif)', fontWeight:600, fontSize:40, lineHeight:1, letterSpacing:'-0.01em', color:c.valueColor, fontVariantNumeric:'tabular-nums' }}>
-                {c.value}
-              </div>
-              {i === 0 && <div style={{ fontSize:9, color:'#B0ADA9', marginTop:6, lineHeight:1.3 }}>* Excludes Amortization &amp; placeholder vendors</div>}
-            </div>
-            <div className="vkpi-back">
-              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.2em', textTransform:'lowercase', color:'rgba(255,255,255,0.45)', marginBottom:10, fontFamily:'var(--font-serif)' }}>{c.label}</div>
-              <div style={{ fontSize:13, fontWeight:500, color:'rgba(255,255,255,0.9)', lineHeight:1.4, fontFamily:'var(--font-sans)', whiteSpace:'pre-line' }}>{c.sub}</div>
-              <div style={{ marginTop:12, fontFamily:'var(--font-serif)', fontWeight:600, fontSize:22, color:'rgba(255,255,255,0.28)', fontVariantNumeric:'tabular-nums', letterSpacing:'-0.01em' }}>{c.value}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
+      color: light ? 'rgba(255,255,255,0.52)' : OV.stone,
+      marginBottom: 10,
+    }}>{text}</div>
   );
 }
 
-function SortArrow({ col, sort }) {
-  if (sort.col !== col) return <span style={{ color:'#D0CEC8', marginLeft:3, fontSize:9 }}>↕</span>;
-  return <span style={{ color:'#6699FF', marginLeft:3, fontSize:9 }}>{sort.dir === 'desc' ? '↓' : '↑'}</span>;
-}
+// ── OvFilterDrop — compact multi-select dropdown ──────────────────────────
+function OvFilterDrop({ label, options, value, onChange }) {
+  const [open, setOpen] = useStateOV(false);
+  const [noneMode, setNoneMode] = useStateOV(false);
+  const ref = useRefOV(null);
 
-// ── Mini budget bar ───────────────────────────────────────────────────────
-function BudgetBar({ actual, forecast, budget }) {
-  if (!budget || budget <= 0) return <span style={{ color:'#D8D6D2', fontSize:12 }}>—</span>;
-  const pct = Math.min(forecast / budget * 100, 130);
-  const over = forecast > budget;
-  const color = over ? '#C03A3A' : pct > 85 ? '#96600A' : '#6699FF';
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:3, minWidth:80 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
-        <span style={{ fontSize:11, fontWeight:600, color, fontVariantNumeric:'tabular-nums' }}>{(forecast/budget*100).toFixed(0)}%</span>
-      </div>
-      <div style={{ height:4, background:'#EDECEA', borderRadius:2, overflow:'hidden', position:'relative' }}>
-        <div style={{ position:'absolute', left:0, top:0, height:'100%', width:`${Math.min(pct,100)}%`, background:color, borderRadius:2 }} />
-      </div>
-    </div>
-  );
-}
+  function closeDropdown() { setOpen(false); setNoneMode(false); }
 
-// ── Rich Vendor Detail ────────────────────────────────────────────────────
-function VendorDetail({ vendor: v, onClose }) {
-  const st     = vendorStatus(v);
-  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const acArr  = v.monthlyAC || [];
-  // Stop at first gap so future months with stray data don't count as actuals
-  let actCnt = 0;
-  for (let i = 0; i < 12; i++) {
-    if ((acArr[i] || 0) > 1) actCnt = i + 1;
-    else break;
-  }
-  const maxM   = Math.max(...[...(v.monthlyAC||[]),...(v.monthlyFC||[])].map(Math.abs), 1);
+  useEffectOV(() => {
+    if (!open) return;
+    function onDown(e) { if (ref.current && !ref.current.contains(e.target)) closeDropdown(); }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
 
-  const [expandedCat, setExpandedCat] = useStateV(null);
-  const [detailSort, setDetailSort] = useStateV({ col:'actual', dir:'desc' });
-  const lineItems = v.lineItems || [];
+  // Reset noneMode whenever value is cleared externally (e.g. "Clear all" button)
+  useEffectOV(() => { if (value.length > 0) setNoneMode(false); }, [value.length]);
 
-  function toggleDetailSort(col) {
-    setDetailSort(s => s.col === col ? { col, dir: s.dir==='desc'?'asc':'desc' } : { col, dir:'desc' });
-  }
-  function detailSortArrow(col) {
-    if (detailSort.col !== col) return <span style={{ color:'#9AA3C7', marginLeft:3, fontSize:9 }}>↕</span>;
-    return <span style={{ color:'#333C66', marginLeft:3, fontSize:9 }}>{detailSort.dir === 'desc' ? '↓' : '↑'}</span>;
+  const isAll = value.length === 0 && !noneMode;
+  const allChecked = isAll;
+  const isFiltered = noneMode || value.length > 0;
+
+  function handleAll() {
+    if (noneMode)   { setNoneMode(false); onChange([]); }  // re-check All
+    else if (isAll) { setNoneMode(true);  onChange([]); }  // uncheck All → none
+    else            { setNoneMode(false); onChange([]); }  // partial → clear to All
   }
 
+  const toggle = v => {
+    if (noneMode) { setNoneMode(false); onChange([v]); return; }  // first pick after none
+    const base = isAll ? options : value;
+    const next = base.includes(v) ? base.filter(x => x !== v) : [...base, v];
+    if (next.length === 0) { setNoneMode(true); onChange([]); }
+    else onChange(next.length === options.length ? [] : next);
+  };
 
-
-
-  // ── Category groups for two-level drill-down ─────────────────────────
-  const catGroups = useMemoV(() => {
-    // Build rollup per category from lineItems
-    const rollup = new Map();
-    for (const li of lineItems) {
-      const cat = li.spendCategory || li.subCategory || li.category || '(Uncategorized)';
-      if (!rollup.has(cat)) rollup.set(cat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0, items:[] });
-      const g = rollup.get(cat);
-      const ac = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-      const fc = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
-      g.items.push(li); g.budget += li.budget||0; g.actual += ac; g.forecast += fc;
-      g.risk += li.risk||0; g.opp += li.opp||0; g.net += li.net||0;
-    }
-    // If Notes sheet provided ordered category rows, use that order + notes
-    if (v.categoryNotes && v.categoryNotes.length) {
-      const groups = v.categoryNotes.map(({ category, note }) => {
-        // Try exact match first, then case-insensitive
-        const r = rollup.get(category)
-          || rollup.get([...rollup.keys()].find(k => k.toLowerCase() === category.toLowerCase()) || '')
-          || { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0, items:[] };
-        return { category, note, ...r };
-      });
-      // Append any lineItem categories not in Notes sheet
-      for (const [cat, r] of rollup) {
-        if (!groups.find(g => g.category === cat)) groups.push({ category: cat, note:'', ...r });
-      }
-      return groups;
-    }
-    return [...rollup.entries()]
-      .map(([cat, r]) => ({ category: cat, note: r.items.find(li => li.notesRO)?.notesRO || '', ...r }))
-      .sort((a, b) => (b.budget||0) - (a.budget||0));
-  }, [lineItems, v.categoryNotes]);
-
-
-
-  const netIsRisk = v.net > 100;
-  const netIsOpp  = v.net < -100;
-  const [netCardHover, setNetCardHover] = useStateV(false);
+  const isChecked = o => !noneMode && (isAll || value.includes(o));
 
   return (
-    <div style={{ borderTop:'2px solid #6699FF30', background:'#FAFAF8' }}>
-
-      {/* ── Header ── */}
-      <div style={{ background:st.bg, padding:'16px 24px', borderBottom:`1px solid ${st.color}20`, display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
-        <div>
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
-            <span style={{ fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', color:'#fff', background:st.color, padding:'2px 8px', borderRadius:3 }}>{st.label}</span>
-          </div>
-          <div style={{ fontSize:20, fontWeight:800, color:'#1A1F3C', letterSpacing:'-0.01em', marginBottom:6 }}>{v.vendor}</div>
-          <div style={{ display:'flex', gap:20, flexWrap:'wrap' }}>
-            {v.domains?.length > 0 && (
-              <span style={{ fontSize:11, color:'#807E7A' }}>
-                <span style={{ color:'#B0ADA9', marginRight:4 }}>Domain:</span>{v.domains.join(' · ')}
-              </span>
-            )}
-            {v.domainOwners?.length > 0 && (
-              <span style={{ fontSize:11, color:'#807E7A' }}>
-                <span style={{ color:'#B0ADA9', marginRight:4 }}>Owner:</span>{v.domainOwners.join(' · ')}
-              </span>
-            )}
-            <span style={{ fontSize:11, color:'#B0ADA9' }}>{lineItems.length} line item{lineItems.length!==1?'s':''}</span>
-          </div>
-        </div>
-        <button onClick={onClose} style={{ background:'#fff', border:'1px solid #EDECEA', cursor:'pointer', color:'#807E7A', fontSize:12, fontWeight:600, padding:'6px 14px', display:'flex', alignItems:'center', gap:5, flexShrink:0, whiteSpace:'nowrap' }}>
-          <Icon name="close" size={11} color="#9E9B97" /> Close
-        </button>
-      </div>
-
-      <div style={{ padding:'20px 24px', display:'grid', gap:20, minWidth:0 }}>
-
-        {/* ── 3 KPI cards ── */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
-          <div style={{ padding:'16px 20px', background:'#fff', border:'1px solid #EDECEA', borderRadius:6, borderTop:'3px solid #6699FF' }}>
-            <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#B0ADA9', marginBottom:6 }}>Annual Budget</div>
-            <div style={{ fontSize:22, fontWeight:800, color:'#333C66', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{fmt.m2(v.budget)}</div>
-          </div>
-          <div style={{ padding:'16px 20px', background:'#fff', border:'1px solid #EDECEA', borderRadius:6, borderTop:`3px solid ${v.forecast>v.budget?'#E87878':'#6699FF'}` }}>
-            <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#B0ADA9', marginBottom:6 }}>Year-End Forecast</div>
-            <div style={{ fontSize:22, fontWeight:800, color:v.forecast>v.budget?'#C03A3A':'#333C66', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{fmt.m2(v.forecast)}</div>
-            <div style={{ fontSize:11, color:'#9E9B97', marginTop:5 }}>{fmt.m2(Math.abs(v.forecast-v.budget))} {v.forecast>v.budget?'over':'under'} budget</div>
-          </div>
-          <div
-            style={{ padding:'16px 20px', background:'#fff', border:'1px solid #EDECEA', borderRadius:6, borderTop:`3px solid ${netIsRisk?'#E87878':netIsOpp?'#72D4A0':'#D0CEC8'}`, position:'relative', overflow:'hidden', cursor:'default' }}
-            onMouseEnter={() => setNetCardHover(true)}
-            onMouseLeave={() => setNetCardHover(false)}
-          >
-            <div style={{ position:'absolute', inset:0, padding:'16px 20px', display:'flex', flexDirection:'column', transition:'opacity 0.25s', opacity: netCardHover ? 0 : 1 }}>
-              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#B0ADA9', marginBottom:6 }}>Net Risk / (Opportunity)</div>
-              <div style={{ fontSize:22, fontWeight:800, color:netIsRisk?'#C03A3A':netIsOpp?'#1F7A4D':'#9E9B97', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>
-                {Math.abs(v.net)>100 ? fmt.signed2(v.net) : '—'}
-              </div>
-              <div style={{ fontSize:11, color:'#9E9B97', marginTop:5 }}>{netIsRisk?'Net risk exposure':netIsOpp?'Net opportunity':'Balanced'}</div>
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '6px 12px',
+          background: isFiltered ? OV.navy : '#fff',
+          border: `1px solid ${isFiltered ? OV.navy : OV.border}`,
+          color: isFiltered ? '#fff' : OV.stone,
+          cursor: 'pointer', fontFamily: OV.sans, fontSize: 12,
+          fontWeight: isFiltered ? 600 : 500,
+          transition: 'all 0.12s',
+        }}
+      >
+        {noneMode ? `${label} · 0` : value.length > 0 ? `${label} · ${value.length}` : label}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d={open ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'} />
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 50,
+          background: '#fff', border: `1px solid ${OV.border}`,
+          boxShadow: '0 4px 20px rgba(51,60,102,0.14)',
+          minWidth: 220, maxHeight: 300, overflowY: 'auto',
+        }}>
+          {options.length === 0 && (
+            <div style={{ padding: '10px 14px', fontSize: 12, color: OV.stone, fontFamily: OV.sans }}>
+              No options available
             </div>
-            <div style={{ position:'absolute', inset:0, padding:'16px 20px', display:'flex', flexDirection:'column', justifyContent:'center', background:'#333C66', transition:'opacity 0.25s', opacity: netCardHover ? 1 : 0 }}>
-              <div style={{ fontSize:9, fontWeight:700, letterSpacing:'0.18em', textTransform:'lowercase', color:'rgba(255,255,255,0.45)', marginBottom:8, fontFamily:'var(--font-serif)' }}>net risk / (opportunity)</div>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,0.88)', lineHeight:1.45 }}>Sum of all vendor risk and opportunity positions. Positive = net risk. Negative = net opportunity.</div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Monthly Breakdown table ── */}
-        {(v.monthlyAC||[]).some(x => x > 0) && (
-          <div>
-            <div style={{ fontSize:13, fontWeight:700, color:'#1A1F3C', marginBottom:10 }}>Monthly Breakdown</div>
-            <div style={{ overflowX:'auto', border:'1px solid #EDECEA', borderRadius:6 }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
-                <thead>
-                  <tr style={{ background:'#F5F3F0' }}>
-                    <th style={{ padding:'8px 14px', textAlign:'left', fontWeight:600, color:'#9E9B97', fontSize:11, width:80, borderBottom:'1px solid #EDECEA' }}></th>
-                    {MONTHS.map((mo, i) => (
-                      <th key={mo} style={{ padding:'8px 10px', textAlign:'center', fontWeight:500, color: i < actCnt ? '#807E7A' : '#B0ADA9', fontSize:11, borderBottom:'1px solid #EDECEA', whiteSpace:'nowrap' }}>
-                        {mo.toLowerCase()}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* Actuals row */}
-                  <tr style={{ borderBottom:'1px solid #F2F0EE' }}>
-                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Actuals</td>
-                    {MONTHS.map((mo, i) => {
-                      const ac = (v.monthlyAC||[])[i] || 0;
-                      const show = i < actCnt && ac > 0;
-                      return (
-                        <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color: show ? '#1A1F3C' : '#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
-                          {show ? fmt.k(ac) : '—'}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  {/* Forecast row */}
-                  <tr style={{ borderBottom:'1px solid #F2F0EE' }}>
-                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Forecast</td>
-                    {MONTHS.map((mo, i) => {
-                      const fc = (v.monthlyFC||[])[i] || 0;
-                      return (
-                        <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color: fc > 0 ? '#6699FF' : '#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
-                          {fc > 0 ? fmt.k(fc) : '—'}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  {/* Variance row */}
-                  <tr>
-                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Variance</td>
-                    {MONTHS.map((mo, i) => {
-                      const ac  = (v.monthlyAC||[])[i] || 0;
-                      const sfc = synthMonthlyFC(v.monthlyAC, v.monthlyFC, v.forecast);
-                      const fc  = sfc[i] || 0;
-                      if (i >= actCnt || ac === 0) {
-                        return <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color:'#C8C6C0' }}>—</td>;
-                      }
-                      const diff = ac - fc;
-                      if (Math.abs(diff) < 1) {
-                        return <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color:'#C8C6C0' }}>—</td>;
-                      }
-                      const unfav = diff > 0;
-                      return (
-                        <td key={mo} style={{ padding:'10px 10px', textAlign:'center', color: unfav ? '#C03A3A' : '#1F7A4D', fontWeight:600, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
-                          {unfav ? '+' : ''}{fmt.k(diff)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            {/* Legend */}
-            <div style={{ display:'flex', gap:16, marginTop:8, fontSize:11, color:'#9E9B97', flexWrap:'wrap' }}>
-              <span style={{ display:'flex', alignItems:'center', gap:5 }}>
-                <span style={{ width:10, height:10, background:'#333C66', display:'inline-block', borderRadius:1 }}></span>
-                Actuals
-              </span>
-              <span style={{ display:'flex', alignItems:'center', gap:5 }}>
-                <span style={{ width:10, height:10, background:'#6699FF', display:'inline-block', borderRadius:1 }}></span>
-                Forecast
-              </span>
-              <span style={{ display:'flex', alignItems:'center', gap:4 }}>
-                <span style={{ color:'#C03A3A', fontWeight:700 }}>+</span> Unfavorable variance
-              </span>
-              <span style={{ display:'flex', alignItems:'center', gap:4 }}>
-                <span style={{ color:'#1F7A4D', fontWeight:700 }}>—</span> Favorable variance
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* ── Two-level drill-down: Category → Project ── */}
-        {lineItems.length > 0 && (
-          <div>
-            <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:'#9E9B97', marginBottom:10 }}>
-              Line Items by Category
-              <span style={{ fontSize:10, fontWeight:400, textTransform:'none', letterSpacing:0, color:'#C8C6C0', marginLeft:8 }}>{lineItems.length} items · {catGroups.length} {catGroups.length===1?'category':'categories'}</span>
-            </div>
-            <div style={{ border:'1px solid #EDECEA', borderRadius:6, overflow:'hidden' }}>
-              {catGroups.map((cg, ci) => {
-                const isOpen = expandedCat === cg.category;
-                const cons   = cg.budget > 0 ? cg.forecast / cg.budget * 100 : null;
-                return (
-                  <div key={cg.category}>
-                    {/* Level 1 – category row */}
-                    <div
-                      onClick={() => setExpandedCat(isOpen ? null : cg.category)}
-                      style={{ display:'grid', gridTemplateColumns:'1fr repeat(4,auto)', gap:20, padding:'12px 16px', background: isOpen ? '#EEF0FA' : ci%2===0?'#fff':'#FAFAF8', borderBottom:'1px solid #EDECEA', cursor:'pointer', alignItems:'start' }}
-                    >
-                      <div>
-                        <div style={{ fontWeight:700, fontSize:13, color:'#1A1F3C', display:'flex', alignItems:'center', gap:8 }}>
-                          <span style={{ fontSize:9, color: isOpen?'#6699FF':'#B0ADA9', display:'inline-block', transform: isOpen?'rotate(90deg)':'none', transition:'transform 0.15s', lineHeight:1 }}>▶</span>
-                          {cg.category}
-                          <span style={{ fontSize:10, fontWeight:400, color:'#B0ADA9' }}>{cg.items.length} line{cg.items.length!==1?'s':''}</span>
-                        </div>
-                        {cg.note && (
-                          <div style={{ fontSize:11, color:'#807E7A', marginTop:5, marginLeft:17, lineHeight:1.45, maxWidth:440 }}>{cg.note}</div>
-                        )}
-                      </div>
-                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actuals', cg.actual>0?fmt.k(cg.actual):'—'], ['Forecast', fmt.k(cg.forecast)], ['Consumption', cons!==null?`${cons.toFixed(0)}%`:'—']].map(([lbl,val],vi) => (
-                        <div key={lbl} style={{ textAlign:'right', minWidth:64 }}>
-                          <div style={{ fontSize:9, color:'#B0ADA9', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3 }}>{lbl}</div>
-                          <div style={{ fontSize:13, fontWeight:700, color: lbl==='Consumption'&&cons!==null ? (cons>100?'#C03A3A':cons>85?'#96600A':'#333C66') : '#333C66', fontVariantNumeric:'tabular-nums' }}>{val}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Level 2 – project rows */}
-                    {isOpen && (
-                      <div style={{ background:'#F6F7FB', borderBottom:'1px solid #EDECEA' }}>
-                        <table style={{ width:'100%', minWidth:1280, borderCollapse:'collapse', fontSize:11 }}>
-                          <thead>
-                            <tr style={{ background:'#EAECF6' }}>
-                              <th onClick={() => toggleDetailSort('vendor')} style={{ position:'sticky', left:0, zIndex:2, background:'#EAECF6', padding:'7px 16px 7px 32px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', cursor:'pointer', whiteSpace:'nowrap' }}>Vendor {detailSortArrow('vendor')}</th>
-                              <th style={{ padding:'7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Category</th>
-                              <th onClick={() => toggleDetailSort('budget')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Budget {detailSortArrow('budget')}</th>
-                              <th onClick={() => toggleDetailSort('actual')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Actuals {detailSortArrow('actual')}</th>
-                              <th onClick={() => toggleDetailSort('forecastOnly')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Forecast {detailSortArrow('forecastOnly')}</th>
-                              <th onClick={() => toggleDetailSort('actfc')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Actuals + Forecast {detailSortArrow('actfc')}</th>
-                              <th onClick={() => toggleDetailSort('cons')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Budget Consumption % {detailSortArrow('cons')}</th>
-                              <th onClick={() => toggleDetailSort('risk')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Risk {detailSortArrow('risk')}</th>
-                              <th onClick={() => toggleDetailSort('opp')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Opportunity {detailSortArrow('opp')}</th>
-                              <th onClick={() => toggleDetailSort('net')} style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer' }}>Net Risk/Opportunity {detailSortArrow('net')}</th>
-                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes - Risk/Opportunity</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {[...cg.items].sort((a,b) => {
-                              const val = (li) => {
-                                const ac = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-                                const fcOnly = Math.max((li.forecast||0) - ac, 0);
-                                const cons = (li.budget||0) > 0 ? (li.forecast||0)/(li.budget||0) : 0;
-                                if (detailSort.col === 'vendor') return (li.vendor||'').toLowerCase();
-                                if (detailSort.col === 'budget') return li.budget||0;
-                                if (detailSort.col === 'actual') return ac;
-                                if (detailSort.col === 'forecastOnly') return fcOnly;
-                                if (detailSort.col === 'actfc') return li.forecast||0;
-                                if (detailSort.col === 'cons') return cons;
-                                if (detailSort.col === 'risk') return li.risk||0;
-                                if (detailSort.col === 'opp') return Math.abs(li.opp||0);
-                                if (detailSort.col === 'net') return li.net||0;
-                                return ac;
-                              };
-                              const av = val(a), bv = val(b), mul = detailSort.dir === 'desc' ? -1 : 1;
-                              if (typeof av === 'string') return mul * av.localeCompare(bv);
-                              return mul * (av - bv);
-                            }).map((li, idx) => {
-                              const acLI = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-                              const fcOnlyLI = Math.max((li.forecast||0) - acLI, 0);
-                              const consLI = (li.budget||0)>0 ? (li.forecast||0)/(li.budget||0)*100 : null;
-                              return (
-                                <tr key={idx} style={{ borderTop:'1px solid #E4E6F2', background: idx%2===0?'#F6F7FB':'#F0F1F8' }}>
-                                  <td style={{ position:'sticky', left:0, zIndex:1, background: idx%2===0?'#F6F7FB':'#F0F1F8', padding:'8px 12px 8px 32px', color:'#1A1F3C', minWidth:180 }}>
-                                    <div style={{ fontWeight:600 }}>{li.vendor || v.vendor || '—'}</div>
-                                    <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1, maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{li.application || li.project || ''}</div>
-                                  </td>
-                                  <td style={{ padding:'8px 12px', color:'#1A1F3C', whiteSpace:'nowrap' }}>{li.subCategory || li.category || '—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:li.budget>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{li.budget>0?fmt.k(li.budget):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:acLI>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{acLI>0?fmt.k(acLI):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:fcOnlyLI>0?'#333C66':'#D8D6D2', whiteSpace:'nowrap' }}>{fcOnlyLI>0?fmt.k(fcOnlyLI):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(li.forecast||0)}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:consLI===null?'#D8D6D2':consLI>100?'#C03A3A':consLI>85?'#96600A':'#333C66', whiteSpace:'nowrap' }}>{consLI===null?'—':`${consLI.toFixed(0)}%`}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:(li.risk||0)>100?'#C03A3A':'#D8D6D2', whiteSpace:'nowrap' }}>{(li.risk||0)>100?fmt.k(li.risk):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:(li.opp||0)<-100?'#1F7A4D':'#D8D6D2', whiteSpace:'nowrap' }}>{(li.opp||0)<-100?fmt.k(Math.abs(li.opp)):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', fontWeight:Math.abs(li.net||0)>100?600:400, color:(li.net||0)>100?'#C03A3A':(li.net||0)<-100?'#1F7A4D':'#D8D6D2' }}>
-                                    {Math.abs(li.net||0)>100?fmt.signed(li.net):'—'}
-                                  </td>
-                                  <td style={{ padding:'8px 16px 8px 12px', color:'#807E7A', fontSize:10, lineHeight:1.4, wordBreak:'break-word', minWidth:220 }}>
-                                    {li.notesRO || li.notes || <span style={{ color:'#D8D6D2' }}>—</span>}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                          <tfoot>
-                            <tr style={{ background:'#EAECF6', borderTop:'2px solid #6699FF30' }}>
-                              <td style={{ position:'sticky', left:0, background:'#EAECF6', padding:'8px 12px 8px 32px', fontWeight:700, color:'#333C66', fontSize:11 }}>Subtotal</td>
-                              <td />
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.budget>0?fmt.k(cg.budget):'—'}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.actual>0?fmt.k(cg.actual):'—'}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{Math.max((cg.forecast||0)-(cg.actual||0),0)>0?fmt.k(Math.max((cg.forecast||0)-(cg.actual||0),0)):'—'}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast)}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.budget>0 ? ((cg.forecast/cg.budget)>1?'#C03A3A':(cg.forecast/cg.budget)>0.85?'#96600A':'#333C66'):'#D8D6D2' }}>{cg.budget>0?`${(cg.forecast/cg.budget*100).toFixed(0)}%`:'—'}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:(cg.risk||0)>100?'#C03A3A':'#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{(cg.risk||0)>100?fmt.k(cg.risk):'—'}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:(cg.opp||0)<-100?'#1F7A4D':'#D8D6D2', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{(cg.opp||0)<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2' }}>{Math.abs(cg.net)>100?fmt.signed(cg.net):'—'}</td>
-                              <td />
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Vendor table ────────────────────────────────────────────────────
-const VTR_COLS = [
-  { key:'vendor',   label:'Vendor',            cls:'',    sort:true  },
-  { key:'cat',      label:'Category',           cls:'',    sort:false },
-  { key:'budget',   label:'Budget',             cls:'num', sort:true  },
-  { key:'actual',   label:'Actuals',            cls:'num', sort:true  },
-  { key:'fconly',   label:'Forecast',           cls:'num', sort:true  },
-  { key:'actfc',    label:'Actuals + Forecast',cls:'num', sort:true  },
-  { key:'cons',     label:'Budget Consumption %', cls:'num', sort:true  },
-  { key:'risk',     label:'Risk',               cls:'num', sort:true  },
-  { key:'opp',      label:'Opportunity',        cls:'num', sort:true  },
-  { key:'net',      label:'Net Risk/(Opp)',      cls:'num', sort:true, tooltip:'Sum of risk and opportunity positions.\nPositive = net risk. Negative = net opportunity.'  },
-];
-
-function VendorTable({ vendors, onSelect, selected }) {
-  const [search, setSearch] = useStateV('');
-
-  const [sort,   setSort]   = useStateV({ col:'actual', dir:'desc' });
-const rows = useMemoV(() => {
-    let list = vendors;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(v => v.vendor.toLowerCase().includes(q));
-    }
-    const { col, dir } = sort;
-    const mul = dir === 'desc' ? -1 : 1;
-    return [...list].sort((a, b) => {
-      if (col === 'vendor') return mul * a.vendor.localeCompare(b.vendor);
-      if (col === 'budget') return mul * ((a.budget||0)   - (b.budget||0));
-      if (col === 'actual') return mul * ((a.actual||0)   - (b.actual||0));
-      if (col === 'fconly') return mul * ((a.forecast - a.actual) - (b.forecast - b.actual));
-      if (col === 'actfc')  return mul * ((a.forecast||0) - (b.forecast||0));
-      if (col === 'cons')   return mul * ((a.budget>0?a.forecast/a.budget:0) - (b.budget>0?b.forecast/b.budget:0));
-      if (col === 'risk')   return mul * ((a.risk||0)     - (b.risk||0));
-      if (col === 'opp')    return mul * (Math.abs(a.opp||0) - Math.abs(b.opp||0));
-      if (col === 'net')    return mul * ((a.net||0)      - (b.net||0));
-      return 0;
-    });
-  }, [vendors, search, sort]);
-
-  function toggleSort(col) {
-    setSort(s => s.col === col ? { col, dir: s.dir==='desc'?'asc':'desc' } : { col, dir:'desc' });
-  }
-
-
-  return (
-    <div className="card" style={{ padding:0, overflow:'hidden' }}>
-      {/* Controls */}
-      <div style={{ padding:'16px 20px 12px', borderBottom:'1px solid #EDECEA', background:'#fff' }}>
-        <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:10, gap:12 }}>
-          <div>
-            <span style={{ fontFamily:'var(--font-serif)', fontSize:16, fontWeight:700, color:'#1A1F3C' }}>All Vendors</span>
-            <span style={{ fontSize:11, color:'#9E9B97', marginLeft:10 }}>Click any row for full detail</span>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
-            <span style={{ fontSize:11, color:'#9E9B97', fontVariantNumeric:'tabular-nums' }}>
-              {rows.length}{rows.length !== vendors.length ? ` of ${vendors.length}` : ''} vendors
-            </span>
-            <ExportBtn onClick={() => xlsxExport(rows.map(v => ({
-              'Vendor': v.vendor,
-              'Domain': (v.domains||[]).join('; '),
-              'Domain Owner': (v.domainOwners||[]).join('; '),
-              'Category': v.cat || '',
-              'Budget': v.budget,
-              'Actuals': v.actual,
-              'Forecast': Math.max((v.forecast||0) - (v.actual||0), 0),
-              'Actuals + Forecast': v.forecast,
-              'Budget Consumption %': v.budget > 0 ? (v.forecast / v.budget) : null,
-              'Risk': v.risk,
-              'Opportunity': v.opp,
-              'Net Risk/(Opp)': v.net,
-            })), 'Vendors')} />
-          </div>
-        </div>
-        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-          <div className="search-box" style={{ minWidth:200 }}>
-            <Icon name="search" size={12} color="#807E7A" />
-            <input
-              type="text"
-              placeholder="Search vendors…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} style={{ background:'none', border:'none', cursor:'pointer', color:'#9E9B97', padding:'0 2px', fontSize:14, lineHeight:1, display:'flex', alignItems:'center' }}>×</button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div style={{ overflowX:'auto', maxHeight:480, overflowY:'auto' }}>
-        <table className="tbl">
-          <thead style={{ position:'sticky', top:0, zIndex:3 }}>
-            <tr>
-              {VTR_COLS.map(col => (
-                <th
-                  key={col.key}
-                  className={`${col.cls}${col.sort?' sortable':''}`}
-                  style={{ cursor:col.sort?'pointer':'default', background:'#FAFAF8', whiteSpace:'nowrap' }}
-                  title={col.tooltip || undefined}
-                  onClick={() => col.sort && toggleSort(col.key)}
-                >
-                  {col.label}{col.sort && <SortArrow col={col.key} sort={sort} />}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(v => {
-              const st    = vendorStatus(v);
-              const isSel = selected?.vendor === v.vendor;
-              const cat   = vendorDomCat(v);
-              return (
-                <tr
-                  key={v.vendor}
-                  className={`clickable${isSel?' selected':''}`}
-                  onClick={() => onSelect(isSel ? null : v)}
-                >
-                  {/* Vendor + status */}
-                  <td style={{ minWidth:200 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <div style={{ width:3, height:18, background:st.color, borderRadius:1.5, flexShrink:0 }} />
-                      <div>
-                        <div style={{ fontWeight:600, color:'#1A1F3C', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:200 }} title={v.vendor}>{v.vendor}</div>
-                        {v.domains?.[0] && <div style={{ fontSize:10, color:'#C8C6C0', marginTop:1 }}>{v.domains[0]}</div>}
-                      </div>
-                    </div>
-                  </td>
-                  {/* Category */}
-                  <td style={{ fontSize:12, whiteSpace:'nowrap', maxWidth:140, overflow:'hidden', textOverflow:'ellipsis' }} title={cat}>{cat}</td>
-                  {/* Budget */}
-                  <td className="num">{v.budget>0?fmt.k(v.budget):<span style={{color:'#D8D6D2'}}>—</span>}</td>
-                  {/* Actuals */}
-                  <td className="num">{v.actual>0?fmt.k(v.actual):<span style={{color:'#D8D6D2'}}>—</span>}</td>
-                  {/* Forecast (remaining) */}
-                  <td className="num"><span style={{ fontWeight:600 }}>{fmt.k(v.forecast - v.actual)}</span></td>
-                  {/* Actuals + Forecast */}
-                  <td className="num" style={{ fontWeight:700, color:'#1A1F3C' }}>{fmt.k(v.forecast)}</td>
-                  {/* Budget Consumption % */}
-                  <td className="num" style={{ fontWeight:700, color: v.budget>0 ? ((v.forecast/v.budget)>1 ? '#C03A3A' : (v.forecast/v.budget)>0.85 ? '#96600A' : '#333C66') : '#D8D6D2' }}>
-                    {v.budget>0 ? `${(v.forecast/v.budget*100).toFixed(0)}%` : '—'}
-                  </td>
-                  {/* Risk */}
-                  <td className="num" style={{ color:(v.risk||0)>100?'#C03A3A':'#D8D6D2' }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
-                  {/* Opportunity */}
-                  <td className="num" style={{ color:(v.opp||0)<-100?'#1F7A4D':'#D8D6D2' }}>{(v.opp||0)<-100?fmt.k(Math.abs(v.opp)):'—'}</td>
-                  {/* Net Risk/(Opp) */}
-                  <td className="num">
-                    {Math.abs(v.net)>100
-                      ? <span style={{ color:v.net>0?'#C03A3A':'#1F7A4D', fontWeight:700 }}>{fmt.signed(v.net)}</span>
-                      : <span style={{color:'#D8D6D2'}}>—</span>}
-                  </td>
-
-                </tr>
-              );
-            })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={VTR_COLS.length} style={{ textAlign:'center', padding:'40px 20px', color:'#9E9B97', fontSize:13 }}>
-                  No vendors match
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Side panel detail */}
-      {selected && (
-        <div className="drill-overlay" onClick={() => onSelect(null)}
-          style={{ alignItems:'flex-start', justifyContent:'center', overflowY:'auto', padding:'24px 0' }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ width:'92vw', background:'#FAFAF8', borderRadius:8, overflow:'hidden',
-              boxShadow:'0 8px 48px rgba(28,33,63,0.22)', animation:'slidein 0.25s cubic-bezier(0.2,0,0.2,1)',
-              margin:'auto' }}>
-            <VendorDetail vendor={selected} onClose={() => onSelect(null)} />
-          </div>
+          )}
+          {options.length > 0 && (
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 14px', cursor: 'pointer',
+              background: allChecked ? '#F4F6FF' : 'transparent',
+              borderBottom: `1px solid ${OV.border}`,
+            }}>
+              <input type="checkbox" checked={allChecked} onChange={handleAll}
+                style={{ accentColor: OV.navy, width: 13, height: 13, flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontFamily: OV.sans, color: OV.navy, fontWeight: 700 }}>All</span>
+            </label>
+          )}
+          {options.map(opt => (
+            <label key={opt} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 14px', cursor: 'pointer',
+              background: isChecked(opt) ? '#F4F6FF' : 'transparent',
+              transition: 'background 0.1s',
+            }}>
+              <input type="checkbox" checked={isChecked(opt)} onChange={() => toggle(opt)}
+                style={{ accentColor: OV.navy, width: 13, height: 13, flexShrink: 0 }} />
+              <span style={{
+                fontSize: 12, fontFamily: OV.sans,
+                color: isChecked(opt) ? OV.navy : '#3C3A36',
+                fontWeight: isChecked(opt) ? 600 : 400,
+              }}>{opt}</span>
+            </label>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// ── Main Vendors Tab ──────────────────────────────────────────────────────
-function VendorsTab({ data }) {
-  const [selected, setSelected] = useStateV(null);
-  const [flt, setFlt]           = useStateV({ domains:[], owners:[], cats:[], vendors:[] });
+// ── ovBuildDrillHierarchy ────────────────────────────────────────────────
+// Builds a category → vendor → contract hierarchy from lineItems for a
+// given numeric field (risk, opp-abs, or net).  The resulting structure
+// is identical to the format consumed by KPIDrillPanel and NetDrillPanel:
+//   { total, categories: [{ cat, amount, vendors: [{ name, amount, contracts }] }] }
+//
+// DATA SOURCE: always the workbook-scoped lineItems passed into OverviewTab.
+// This guarantees the drill hierarchy reconciles exactly to the KPI cards.
+function ovBuildDrillHierarchy(lineItems, getAmount) {
+  const byCat = {};
+  for (const li of lineItems) {
+    const amt = getAmount(li);
+    if (Math.abs(amt) < 0.005) continue; // skip zero-value rows
+    const cat    = ovCat(li);
+    const vendor = li.vendor || '(unspecified)';
+    const appPfx = li.application && li.application !== 'N/A' && li.application.trim()
+      ? li.application + ' — ' : '';
+    const cName  = (appPfx + (li.project || '')).slice(0, 80) || vendor;
+    if (!byCat[cat]) byCat[cat] = {};
+    if (!byCat[cat][vendor]) byCat[cat][vendor] = { total: 0, contracts: [] };
+    // Accumulate raw (unrounded) amounts so the final total exactly matches
+    // the workbookSubtotal field (no floating-point drift from cent-rounding).
+    byCat[cat][vendor].total += amt;
+    byCat[cat][vendor].contracts.push({ name: cName, amount: amt, notes: li.notes || '' });
+  }
+  const r2 = n => Math.round(n * 100) / 100; // round only at display boundary
+  const categories = Object.entries(byCat).map(([cat, vendorMap]) => {
+    const vendors = Object.entries(vendorMap)
+      .map(([name, data]) => {
+        const vendorTotal = data.total;
+        const mat = data.contracts
+          .filter(c => Math.abs(c.amount) >= 100)
+          .map(c => ({ ...c, amount: r2(c.amount) }));
+        const resid = vendorTotal - mat.reduce((s,c)=>s+c.amount,0);
+        if (Math.abs(resid) >= 0.01) mat.push({ name:'Other / minor', amount: r2(resid), notes:'' });
+        return { name, amount: r2(vendorTotal), contracts: mat };
+      })
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const catRaw = vendors.reduce((s,v)=>s+v.amount,0);
+    return { cat, amount: r2(catRaw), vendors };
+  }).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  return {
+    total: r2(categories.reduce((s,c)=>s+c.amount,0)),
+    categories,
+  };
+}
+
+// ── Inline category waterfall (light theme, for in-page drilldown) ──────────
+function OvCatWaterfall({ catBudget, catForecast, wfSteps }) {
+  const [hov, setHov] = useStateOV(null);
+  if (!wfSteps || wfSteps.length === 0) return null;
+  const N = wfSteps.length;
+
+  const allVals = [catBudget, catForecast, ...wfSteps.map(s => s.from), ...wfSteps.map(s => s.to)];
+  const rawMin  = Math.min(...allVals);
+  const rawMax  = Math.max(...allVals);
+  const spread  = Math.max(rawMax - rawMin, Math.abs(catBudget) * 0.005, 1);
+  const floorV  = rawMin - spread * 1.3;
+  const ceilV   = rawMax + spread * 0.65;
+  const vRange  = Math.max(ceilV - floorV, 1);
+
+  const VW = 1060, VH = 360;
+  const CT = 86, CB = 120;
+  const CH = VH - CT - CB;
+  const AXIS_Y = CT + CH;
+  const CL = 16, CR = 1044;
+
+  const BW   = 90;
+  const AVAIL = CR - CL - 2 * BW;
+  const CW    = Math.max(28, Math.min(80, Math.floor(AVAIL / (N * 1.5))));
+  const GAP   = Math.max(6, (AVAIL - N * CW) / (N + 1));
+  const stepX = i => CL + BW + (i + 1) * GAP + i * CW;
+  const fcX   = CL + BW + (N + 1) * GAP + N * CW;
+  const scY   = v => CT + CH * (1 - (v - floorV) / vRange);
+
+  const maxUnfav = wfSteps.filter(s => s.variance > 0).reduce((m, s) => Math.max(m, s.variance), -Infinity);
+  const minFav   = wfSteps.filter(s => s.variance < 0).reduce((m, s) => Math.min(m, s.variance), Infinity);
+
+  const totalVar = catForecast - catBudget;
+  const totFav   = totalVar <= 0;
+  const FCC      = totFav ? OV.green : OV.red;
+  const varPct   = Math.abs(catBudget) > 0 ? Math.abs(totalVar / catBudget * 100).toFixed(1) : '0.0';
+  return (
+    <svg width="100%" viewBox={`0 0 ${VW} ${VH}`} style={{ display: 'block' }}>
+      {[0.33, 0.67].map(t => (
+        <line key={t} x1={CL} y1={CT + CH * t} x2={CR} y2={CT + CH * t}
+          stroke={OV.border} strokeWidth="1" strokeDasharray="2 4" />
+      ))}
+      <line x1={CL - 4} y1={AXIS_Y} x2={CR + 4} y2={AXIS_Y} stroke="#D4D2CE" strokeWidth="1.5" />
+
+      {/* Budget bar */}
+      {(() => {
+        const bY = scY(catBudget); const bH = AXIS_Y - bY; const cx = CL + BW / 2;
+        return (
+          <g>
+            <rect x={CL} y={bY} width={BW} height={bH} fill={OV.navy} rx="1" />
+            <text x={cx} y={bY - 26} textAnchor="middle"
+              fill={OV.stone} fontFamily={OV.sans} fontWeight="700" fontSize="8" letterSpacing="0.12em">BUDGET</text>
+            <text x={cx} y={bY - 11} textAnchor="middle"
+              fill={OV.navy} fontFamily={OV.serif} fontWeight="700" fontSize="14"
+              style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt.m(catBudget)}</text>
+            <text x={cx} y={AXIS_Y + 18} textAnchor="middle"
+              fill={OV.navy} fontFamily={OV.sans} fontWeight="700" fontSize="12">Budget</text>
+            <line x1={CL + BW} y1={bY} x2={stepX(0)} y2={bY}
+              stroke="#D4D2CE" strokeWidth="1" strokeDasharray="4 3" />
+          </g>
+        );
+      })()}
+
+      {/* Step bars */}
+      {wfSteps.map((step, i) => {
+        const isNeut     = Math.abs(step.variance) < 500;
+        const isFav      = step.variance < 0;
+        const color      = isNeut ? '#C4C2BE' : isFav ? OV.green : OV.red;
+        const isHov      = hov === step.label;
+        const isLargestUF  = step.variance > 0 && step.variance === maxUnfav;
+        const isLargestFav = step.variance < 0 && step.variance === minFav;
+        const hasBadge   = (isLargestUF || isLargestFav) && !isNeut;
+        const cx = stepX(i) + CW / 2;
+        const hiVal = Math.max(step.from, step.to); const loVal = Math.min(step.from, step.to);
+        const topY = scY(hiVal); const botY = scY(loVal);
+        const stepH = Math.max(botY - topY, 2);
+        const connY = scY(step.to);
+        const nextX = i < N - 1 ? stepX(i + 1) : fcX;
+        const lblX = stepX(i) + CW / 2;
+        const lblY = AXIS_Y + 14;
+        return (
+          <g key={`${step.label}-${i}`}
+            onMouseEnter={() => setHov(step.label)}
+            onMouseLeave={() => setHov(null)}>
+            <rect x={stepX(i)} y={topY} width={CW} height={stepH} rx="1"
+              fill={color} opacity={isNeut ? 0.35 : isHov ? 1 : 0.82}
+              style={{ transition: 'opacity 0.12s' }} />
+            {hasBadge && (
+              <g>
+                <rect x={stepX(i) + 2} y={topY - 22} width={CW - 4} height={13} rx="2" fill={color} opacity="0.14" />
+                <text x={cx} y={topY - 12} textAnchor="middle"
+                  fill={color} fontFamily={OV.sans} fontWeight="800" fontSize="7.5" letterSpacing="0.1em">
+                  {isFav ? '\u2193 LARGEST OFFSET' : '\u2191 LARGEST DRIVER'}
+                </text>
+              </g>
+            )}
+            {!isNeut && (
+              <text x={cx} y={topY - (hasBadge ? 30 : 9)} textAnchor="middle"
+                fill={color} fontFamily={OV.serif} fontWeight="700" fontSize="13"
+                style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {isFav ? '\u2212' : '+'}{fmt.k(Math.abs(step.variance))}
+              </text>
+            )}
+            <text
+              transform={`rotate(-38, ${lblX}, ${lblY})`}
+              x={lblX} y={lblY}
+              textAnchor="end"
+              fill={isHov ? OV.navy : OV.stone}
+              fontFamily={OV.sans}
+              fontWeight={isHov ? 600 : 400}
+              fontSize="11">
+              {step.label}
+            </text>
+            <line x1={stepX(i) + CW} y1={connY} x2={nextX} y2={connY}
+              stroke="#D4D2CE" strokeWidth="1" strokeDasharray="4 3" />
+          </g>
+        );
+      })}
+
+      {/* Forecast bar */}
+      {(() => {
+        const fY = scY(catForecast); const fH = AXIS_Y - fY; const cx = fcX + BW / 2;
+        return (
+          <g>
+            <rect x={fcX} y={fY} width={BW} height={fH} fill={FCC} rx="1" />
+            <text x={cx} y={fY - 22} textAnchor="middle"
+              fill={FCC} fontFamily={OV.sans} fontWeight="700" fontSize="8" letterSpacing="0.1em">
+              {totFav ? '\u25b2 FAV' : '\u25bc UNFAV'}{'\u2002'}{totFav ? '\u2212' : '+'}{varPct}%
+            </text>
+            <text x={cx} y={fY - 8} textAnchor="middle"
+              fill={FCC} fontFamily={OV.serif} fontWeight="700" fontSize="13"
+              style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt.m(catForecast)}</text>
+            <text x={cx} y={AXIS_Y + 16} textAnchor="middle"
+              fill={FCC} fontFamily={OV.sans} fontWeight="600" fontSize="11">Forecast</text>
+          </g>
+        );
+      })()}
+      <text x={VW / 2} y={VH - 6} textAnchor="middle" fill="#C4C2BE" fontFamily={OV.sans} fontSize="9">
+        {`Budget ${fmt.m(catBudget)} ${totFav ? '\u2212' : '+'} ${fmt.m(Math.abs(totalVar))} variance = Forecast ${fmt.m(catForecast)}`}
+      </text>
+    </svg>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────
+function OverviewTab({ data }) {
+  const [sel, setSel]             = useStateOV(null);
+  const [openPanel, setOpenPanel] = useStateOV(null);
+  const [selVendorDrill, setSelVendorDrill]     = useStateOV(null);
+  const [flt, setFlt]             = useStateOV({ domains: [], owners: [], cats: [] });
 
   const allItems = data.lineItems || [];
   const lookups  = data.lookups   || {};
 
-  const domainOpts = useMemoV(() => {
+  // ── Filter option lists ───────────────────────────────────────────────
+  const domainOpts = useMemoOV(() => {
     if (lookups.domains?.length) return lookups.domains.filter(Boolean).sort();
     return [...new Set(allItems.map(li => li.domain).filter(Boolean))].sort();
   }, [allItems, lookups]);
 
-  const ownerOpts = useMemoV(() => {
+  const ownerOpts = useMemoOV(() => {
     if (lookups.owners?.length) return lookups.owners.filter(x => x && x !== 'N/A').sort();
     return [...new Set(allItems.map(li => li.owner).filter(x => x && x !== 'N/A'))].sort();
   }, [allItems, lookups]);
 
-  const filterActive = flt.domains.length + flt.owners.length + flt.cats.length + flt.vendors.length > 0;
-  const clearFilters = () => setFlt({ domains:[], owners:[], cats:[], vendors:[] });
-  const allVendors   = useMemoV(() => data.vendors || [], [data.vendors]);
+  // ── Filtered line items ───────────────────────────────────────────────
+  const items = useMemoOV(() => {
+    const { domains, owners, cats } = flt;
+    if (!domains.length && !owners.length && !cats.length) return allItems;
+    return allItems.filter(li => {
+      if (domains.length && !domains.includes(li.domain)) return false;
+      if (owners.length  && !owners.includes(li.owner))   return false;
+      if (cats.length    && !cats.includes(ovCat(li)))     return false;
+      return true;
+    });
+  }, [allItems, flt]);
 
-  const vendors = useMemoV(() => {
-    if (!filterActive) return allVendors;
-    return allVendors.map(v => {
-      const fi = (v.lineItems || []).filter(li => {
-        if (flt.domains.length && !flt.domains.includes(li.domain)) return false;
-        if (flt.owners.length  && !flt.owners.includes(li.owner))   return false;
-        if (flt.cats.length    && !flt.cats.includes(vdCat(li)))     return false;
-        return true;
-      });
-      if (!fi.length) return null;
-      const ac12 = new Array(12).fill(0);
-      const fc12 = new Array(12).fill(0);
-      fi.forEach(li => {
-        (li.monthlyAC||[]).forEach((x,i) => { ac12[i] += x; });
-        (li.monthlyFC||[]).forEach((x,i) => { fc12[i] += x; });
-      });
+  const filterActive = flt.domains.length + flt.owners.length + flt.cats.length > 0;
+  const clearFilters = () => setFlt({ domains: [], owners: [], cats: [] });
+
+  // ── KPIs ─────────────────────────────────────────────────────────────
+  // When no filters active: use workbook SUBTOTAL values directly (exact match to source).
+  // When filters active: derive from filtered line items.
+  const kpi = useMemoOV(() => {
+    // Source: cleaned Master Data lineItems (workbookSubtotal = lineItems sum,
+    // Capitalization excluded, formula-derived/error cells recomputed from
+    // Budget and Forecast in JS).  YTD Financials Run Rate is used only as a
+    // reconciliation control check — it does NOT drive visible KPI values.
+    if (!filterActive && data.workbookSubtotal) {
+      const ws = data.workbookSubtotal;
       return {
-        ...v,
-        budget:    fi.reduce((s,li) => s + (li.budget   || 0), 0),
-        forecast:  fi.reduce((s,li) => s + (li.forecast || 0), 0),
-        actual:    fi.reduce((s,li) => s + ((li.monthlyAC||[]).reduce((a,x)=>a+x,0)), 0),
-        risk:      fi.reduce((s,li) => s + (li.risk || 0), 0),
-        opp:       fi.reduce((s,li) => s + (li.opp  || 0), 0),
-        net:       fi.reduce((s,li) => s + (li.net  || 0), 0),
-        domains:   [...new Set(fi.map(li => li.domain).filter(Boolean))],
-        monthlyAC: ac12, monthlyFC: fc12, lineItems: fi,
+        budget:    ws.budget,
+        forecast:  ws.forecast,
+        actual:    ws.actual,
+        remaining: ws.remaining,
+        risk:      ws.risk,
+        opp:       ws.absOpp,
+        net:       ws.net,
       };
-    }).filter(Boolean);
-  }, [allVendors, flt, filterActive]);
+    }
+    // Filtered view — derive from filtered line items
+    let b = 0, f = 0, a = 0, r = 0, o = 0, n = 0;
+    for (const li of items) {
+      b += li.budget   || 0;
+      f += li.forecast || 0;
+      a += li.actual   || 0;
+      r += li.risk     || 0;
+      o += li.opp      || 0;
+      n += li.net      || 0;
+    }
+    return { budget: b, forecast: f, actual: a, remaining: f - a, risk: r, opp: Math.abs(o), net: n };
+  }, [items, filterActive, data.workbookSubtotal]);
 
-  const vendorOpts = useMemoV(() =>
-    allVendors.filter(v => isRealVendor(v.vendor)).map(v => v.vendor).sort()
-  , [allVendors]);
+  // Back Pocket: computed from FILTERED lineItems so it respects active filter chips.
+  // = |Σ net| where Non-Committed flag = Y / Yes / True / 1 (case-insensitive).
+  // Falls back to data.summary.backPocket if lineItems lack the nonCommitted field
+  // (e.g. pre-fix localStorage data restored at boot).
+  const backPocket = useMemoOV(() => {
+    const src = items; // uses filtered set — changes with domain/owner/category filters
+    const isFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
+    const flagged = src.filter(li => isFlag(li.nonCommitted));
+    const sum     = flagged.reduce((s, li) => s + (li.net || 0), 0);
+    // Fallback only when no filters are active (legacy localStorage data lacking
+    // the nonCommitted field).  When a filter is active and excludes all Non-Committed
+    // rows, return $0 — do NOT fall back to the static parsed value.
+    if (flagged.length === 0 && !filterActive && data.summary && data.summary.backPocket > 0) {
+      return data.summary.backPocket;
+    }
+    return Math.abs(sum);
+  }, [items, filterActive, data.summary]);
 
-  const realVendors = useMemoV(() => {
-    const base = vendors.filter(v => isRealVendor(v.vendor));
-    if (!flt.vendors.length) return base;
-    return base.filter(v => flt.vendors.includes(v.vendor));
-  }, [vendors, flt.vendors]);
+  // ── Category aggregation — gross Risk and Opportunity per category ──────
+  // Source: cleaned Master Data lineItems (same source as KPI cards).
+  // Risk bars (red) sum to kpi.risk; Opp bars (green) sum to kpi.opp.
+  const cats = useMemoOV(() => {
+    const agg = {};
+    for (const li of items) {
+      const c = ovCat(li);
+      if (!agg[c]) agg[c] = { risk: 0, opp: 0, net: 0 };
+      agg[c].risk += li.risk || 0;
+      agg[c].opp  += Math.abs(li.opp || 0);
+      agg[c].net  += (li.forecast || 0) - (li.budget || 0);
+    }
+    return OV_CATS.map(cat => {
+      const d = agg[cat] || { risk: 0, opp: 0, net: 0 };
+      return { cat, risk: Math.round(d.risk), opp: Math.round(d.opp), v: Math.round(d.net) };
+    });
+  }, [items]);
 
-  // Always derive selected vendor fresh from realVendors — prevents stale data after upload
-  const currentVendor = useMemoV(() => {
-    if (!selected) return null;
-    return realVendors.find(v => v.vendor === selected.vendor) || null;
-  }, [realVendors, selected?.vendor]);
+  const ovMaxBar   = Math.max(...cats.map(c => Math.max(c.risk, c.opp)), 1);
 
-  // Clear selection if vendor disappears after filter/upload
-  useEffectV(() => {
-    if (selected && !realVendors.find(v => v.vendor === selected.vendor)) setSelected(null);
-  }, [realVendors]);
+  // Reconciliation: risk bars → kpi.risk; opp bars → kpi.opp.
+  useEffectOV(() => {
+    const chartRiskTotal = cats.reduce((s, c) => s + c.risk, 0);
+    const chartOppTotal  = cats.reduce((s, c) => s + c.opp,  0);
+    const kpiRisk = kpi.risk;
+    const kpiOpp  = kpi.opp;
+    const riskDiff = Math.abs(chartRiskTotal - kpiRisk);
+    const oppDiff  = Math.abs(chartOppTotal  - kpiOpp);
+    console.log('[risk/opp chart reconcile]', { chartRiskTotal, kpiRisk, riskDiff, chartOppTotal, kpiOpp, oppDiff });
+    if (riskDiff > 1000) console.warn('[risk/opp chart] riskDiff > $1K — check data source');
+    if (oppDiff  > 1000) console.warn('[risk/opp chart] oppDiff > $1K — check data source');
+  }, [cats, kpi.risk, kpi.opp]);
 
-  // Debug logging — fires whenever active workbook data changes
-  useEffectV(() => {
-    const lineItems = data.lineItems || [];
-    const notesMatched = lineItems.filter(li => li.notesRO && li.notesRO.length > 0).length;
-    const totalBudget   = realVendors.reduce((s, v) => s + (v.budget||0), 0);
-    const totalForecast = realVendors.reduce((s, v) => s + (v.forecast||0), 0);
-    const totalRisk     = realVendors.reduce((s, v) => s + (v.risk||0), 0);
-    const totalOpp      = realVendors.reduce((s, v) => s + (v.opp||0), 0);
-    const totalNet      = realVendors.reduce((s, v) => s + (v.net||0), 0);
-    console.log('[vendors] active lineItems count:', lineItems.length);
-    console.log('[vendors] vendor count:', realVendors.length);
-    console.log('[vendors] EXCLUDED vendors:', allVendors.filter(v => !isRealVendor(v.vendor)).map(v => v.vendor));
-    console.log('[vendors] total budget=$'+Math.round(totalBudget/1e3)+'K forecast=$'+Math.round(totalForecast/1e3)+'K risk=$'+Math.round(totalRisk/1e3)+'K opp=$'+Math.round(Math.abs(totalOpp)/1e3)+'K net=$'+Math.round(totalNet/1e3)+'K');
-    console.log('[vendors] notes matched:', notesMatched, 'of', lineItems.length, 'line items');
-  }, [realVendors, data.lineItems]);
+  // ── Drill-down vendors ────────────────────────────────────────────────
+  const drillRows = useMemoOV(() => {
+    if (!sel) return [];
+    const by = {};
+    for (const li of items) {
+      if (ovCat(li) !== sel) continue;
+      const key = sel === 'FPC'
+        ? (li.project || li.vendor || 'Other')
+        : (li.vendor || 'Other');
+      if (!by[key]) by[key] = 0;
+      by[key] += (li.forecast || 0) - (li.budget || 0);
+    }
+    const total = Object.values(by).reduce((s, v) => s + v, 0);
+    const rows  = Object.entries(by)
+      .map(([name, v]) => ({ name, v: Math.round(v) }))
+      .filter(r => Math.abs(r.v) >= 500)
+      .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+      .slice(0, 8);
+    const rest = Math.round(total - rows.reduce((s, r) => s + r.v, 0));
+    if (Math.abs(rest) >= 1) rows.push({ name: 'Other', v: rest });
+    return rows;
+  }, [sel, items]);
 
-  useEffectV(() => {
-    if (!currentVendor) return;
-    const li = currentVendor.lineItems || [];
-    const budget   = li.reduce((s, x) => s + (x.budget||0), 0);
-    const forecast = li.reduce((s, x) => s + (x.forecast||0), 0);
-    const net      = li.reduce((s, x) => s + (x.net||0), 0);
-    console.log('[vendors] selected vendor:', currentVendor.vendor, '| lineItems:', li.length, '| budget=$'+Math.round(budget/1e3)+'K forecast=$'+Math.round(forecast/1e3)+'K net=$'+Math.round(net/1e3)+'K');
-  }, [currentVendor]);
+  const drillCatV   = cats.find(c => c.cat === sel)?.v || 0;
+  const drillMaxAbs = Math.max(...drillRows.map(r => Math.abs(r.v)), 1);
+  // ── Vendor detail for inline waterfall + table ─────────────────────────
+  const drillVendorsData = useMemoOV(() => {
+    if (!sel) return { vendors: [], catBudget: 0, catForecast: 0, wfSteps: [] };
+    const vm = {};
+    for (const li of items) {
+      if (ovCat(li) !== sel) continue;
+      const v = li.vendor || '(unspecified)';
+      if (!vm[v]) vm[v] = { name: v, budget: 0, forecast: 0, contracts: [] };
+      vm[v].budget   += li.budget   || 0;
+      vm[v].forecast += li.forecast || 0;
+      const appPfx = li.application && li.application !== 'N/A' && li.application.trim()
+        ? li.application + ' \u2014 ' : '';
+      const cName = (appPfx + (li.project || '')).trim().slice(0, 80) || v;
+      vm[v].contracts.push({ name: cName, budget: li.budget || 0, forecast: li.forecast || 0, notes: li.notes || '' });
+    }
+    const vendors = Object.values(vm)
+      .map(v => ({ ...v, variance: v.forecast - v.budget }))
+      .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+    const catBudget   = vendors.reduce((s, v) => s + v.budget,   0);
+    const catForecast = vendors.reduce((s, v) => s + v.forecast, 0);
+    const MAX_WF = 8;
+    const top   = vendors.filter(v => Math.abs(v.variance) >= 500).slice(0, MAX_WF);
+    const restV = vendors.reduce((s, v) => s + v.variance, 0) - top.reduce((s, v) => s + v.variance, 0);
+    const restB = catBudget   - top.reduce((s, v) => s + v.budget,   0);
+    const restF = catForecast - top.reduce((s, v) => s + v.forecast, 0);
+    const wfAll = Math.abs(restV) >= 500
+      ? [...top, { name: 'Other / minor', budget: restB, forecast: restF, variance: restV, contracts: [] }]
+      : top;
+    let running = catBudget;
+    const wfSteps = wfAll.map(v => {
+      const from = running; const to = running + v.variance; running = to;
+      return { label: v.name, variance: v.variance, from, to };
+    });
+    return { vendors, catBudget, catForecast, wfSteps };
+  }, [sel, items]);
 
-  const OvFD = window.OvFilterDrop;
 
+
+  // ── Risk / Opp / Net drill hierarchies ───────────────────────────────────
+  // Built from the same workbook-scoped lineItems so totals reconcile to KPIs.
+  // dynRisk.total  === kpi.risk  (within float rounding)
+  // dynOpp.total   === kpi.opp   (both use ABS of the opp column)
+  // dynNet.total   === kpi.net   (signed; negative = favorable)
+  const dynRisk = useMemoOV(() =>
+    ovBuildDrillHierarchy(items, li => li.risk || 0),
+    [items]
+  );
+  const dynOpp = useMemoOV(() =>
+    // opp values are negative in the workbook (favorable); display as positive amounts
+    ovBuildDrillHierarchy(items, li => Math.abs(li.opp || 0)),
+    [items]
+  );
+  const dynNet = useMemoOV(() =>
+    ovBuildDrillHierarchy(items, li => li.net || 0),
+    [items]
+  );
+
+  // ── Bridge math ───────────────────────────────────────────────────────
+  const totalVar = kpi.forecast - kpi.budget;
+  const fav      = totalVar <= 0;
+  const varPct   = kpi.budget ? (Math.abs(totalVar) / kpi.budget * 100).toFixed(1) : '0.0';
+
+  // Full-width bridge SVG — ~200% wider bars vs old 84px design
+  const BW  = 900, BCH = 160, BPT = 44, BPB = 56;
+  const BSH = BPT + BCH + BPB;
+  const BBW = 150, BM = 60;
+  const BGAP = (BW - 2 * BM - 3 * BBW) / 2;           // 165px gap
+  const BX   = [BM, BM + BBW + BGAP, BM + 2 * (BBW + BGAP)];
+  const BAY  = BPT + BCH;
+  const bScale = Math.max(kpi.budget, kpi.forecast) * 1.15;
+  const bY   = v => BAY - (v / bScale) * BCH;
+  const budY = bY(kpi.budget), fcY = bY(kpi.forecast);
+  const dTop = Math.min(budY, fcY);
+  const dH   = Math.max(Math.abs(budY - fcY), 4);
+  const DC   = fav ? OV.green : OV.red;
+  const FCC  = fav ? OV.navy  : OV.red;
+
+  const CARD = { background: '#fff', border: `1px solid ${OV.border}` };
+  const MB20 = { marginBottom: 20 };
+
+  // ─────────────────────────────────────────────────────────────────────
   return (
     <div>
-      {/* Filter bar */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, flexWrap:'wrap', justifyContent:'center' }}>
-        <span style={{ fontFamily:'var(--font-serif)', fontWeight:800, fontSize:10, letterSpacing:'0.22em', textTransform:'lowercase', color:'#807E7A', marginRight:4 }}>filter</span>
-        <OvFD label="Vendor"       options={vendorOpts} value={flt.vendors} onChange={v => setFlt({...flt, vendors:v})} />
-        <OvFD label="Domain"       options={domainOpts} value={flt.domains} onChange={v => setFlt({...flt, domains:v})} />
-        <OvFD label="Domain Owner" options={ownerOpts}  value={flt.owners}  onChange={v => setFlt({...flt, owners:v})} />
-        <OvFD label="Category"     options={VD_CATS}    value={flt.cats}    onChange={v => setFlt({...flt, cats:v})} />
+
+      {/* ══ FILTER BAR ══════════════════════════════════════════════════ */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        marginBottom: 16, flexWrap: 'wrap',
+        justifyContent: 'center',
+      }}>
+        <span style={{
+          fontFamily: OV.serif, fontWeight: 800, fontSize: 10,
+          letterSpacing: '0.22em', textTransform: 'lowercase',
+          color: OV.stone, marginRight: 4,
+        }}>filter</span>
+        <OvFilterDrop
+          label="Domain" options={domainOpts}
+          value={flt.domains} onChange={v => setFlt({ ...flt, domains: v })}
+        />
+        <OvFilterDrop
+          label="Domain Owner" options={ownerOpts}
+          value={flt.owners} onChange={v => setFlt({ ...flt, owners: v })}
+        />
+        <OvFilterDrop
+          label="Category" options={OV_CATS}
+          value={flt.cats} onChange={v => setFlt({ ...flt, cats: v })}
+        />
         {filterActive && (
           <>
-            <button onClick={clearFilters} style={{ padding:'6px 12px', background:'none', border:'1px solid #ECEAE7', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:12, color:'#807E7A' }}>
-              ✕ Clear all
-            </button>
-            <span style={{ fontSize:11, color:'#807E7A', fontStyle:'italic', fontFamily:'var(--font-sans)' }}>
-              Filtered · {realVendors.length} of {allVendors.filter(v => isRealVendor(v.vendor)).length} vendors
+            <button
+              onClick={clearFilters}
+              style={{
+                padding: '6px 12px', background: 'none',
+                border: `1px solid ${OV.border}`, cursor: 'pointer',
+                fontFamily: OV.sans, fontSize: 12, color: OV.stone,
+              }}>✕ Clear all</button>
+            <span style={{ fontSize: 11, color: OV.stone, fontStyle: 'italic', fontFamily: OV.sans }}>
+              Filtered view · {items.length} of {allItems.length} rows
             </span>
           </>
         )}
       </div>
 
-      <VendorKPIs vendors={realVendors} />
-      <VendorTable vendors={realVendors} onSelect={setSelected} selected={currentVendor} />
+      {/* ══ ROW 1 — 4 PRIMARY KPIs ══════════════════════════════════════ */}
+      <style>{`
+        .kpi-flip { position: relative; cursor: default; }
+        .kpi-flip-inner { position: relative; width: 100%; height: 100%; }
+        .kpi-flip-front {
+          position: absolute; inset: 0;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          padding: 28px; text-align: center;
+          transition: opacity 0.25s;
+        }
+        .kpi-flip-back {
+          position: absolute; inset: 0;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          padding: 28px; text-align: center;
+          background: #333C66;
+          opacity: 0;
+          transition: opacity 0.25s;
+        }
+        .kpi-flip:hover .kpi-flip-back  { opacity: 1; }
+        .kpi-flip:hover .kpi-flip-front { opacity: 0; }
+      `}</style>
+      <div style={{ ...CARD, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', overflow: 'hidden', maxWidth: 1050, margin: '0 auto 20px' }}>
+        {[
+          { label: 'annual budget',      val: fmt.m(kpi.budget),    sub: '2026 approved budget' },
+          { label: 'year-end forecast',  val: fmt.m(kpi.forecast),  sub: 'actuals + remaining forecast' },
+          { label: 'back pocket',        val: 'TBD',                sub: 'non-committed favorable net position' },
 
-      {/* ── Budget vs Actuals vs Remaining Forecast chart ── */}
-      <div style={{ marginTop: 20 }}>
-        <VendorBudgetActualsChart vendors={realVendors} onSelect={setSelected} />
-      </div>
-
-      {/* ── YTD Risks & Opportunities chart ── */}
-      <div style={{ marginTop: 0 }}>
-        <VendorRisksOppsChart vendors={realVendors} onSelect={setSelected} />
-      </div>
-
-    </div>
-  );
-}
-
-// ── YTD Risks & Opportunities by Vendor ─────────────────────────────────
-function VendorRisksOppsChart({ vendors, n = 10, onSelect }) {
-  const [hoveredVendor, setHoveredVendor] = useStateV(null);
-
-  const top = useMemoV(() => {
-    return [...vendors]
-      .filter(v => isRealVendor(v.vendor) && (Math.abs(v.risk || 0) > 100 || Math.abs(v.opp || 0) > 100))
-      .sort((a, b) => (b.net || 0) - (a.net || 0))
-      .slice(0, n);
-  }, [vendors, n]);
-
-  const max = useMemoV(() =>
-    Math.max(...top.map(v => Math.max(v.risk || 0, Math.abs(v.opp || 0))), 1)
-  , [top]);
-
-  if (top.length === 0) return null;
-
-  return (
-    <div className="card" style={{ padding: '24px 28px', marginBottom: 20 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 700, color: '#1A1F3C', marginBottom: 3 }}>
-            YTD Risks &amp; Opportunities by Vendor
-          </div>
-          <div style={{ fontSize: 11, color: '#9E9B97' }}>Net risk/opportunity by vendor · sorted by net descending</div>
-        </div>
-        <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#807E7A', flexShrink: 0, alignItems: 'center' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 12, height: 10, background: '#C03A3A', display: 'inline-block', borderRadius: 1 }}></span>
-            risk (unfavorable)
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 12, height: 10, background: '#1F7A4D', display: 'inline-block', borderRadius: 1 }}></span>
-            opp (favorable)
-          </span>
-        </div>
-      </div>
-
-      {/* Axis labels */}
-      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 110px', gap: 12, marginBottom: 4 }}>
-        <div />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', fontSize: 10, color: '#B0ADA9', marginLeft: 48 }}>
-          <span style={{ textAlign: 'right', paddingRight: 8 }}>← unfavorable (risk)</span>
-          <span style={{ textAlign: 'left', paddingLeft: 8 }}>favorable (opp) →</span>
-        </div>
-        <div />
-      </div>
-
-      {/* Rows */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {top.map((v, i) => {
-          const risk = v.risk || 0;
-          const opp  = Math.abs(v.opp || 0);
-          const net  = v.net || 0;
-          const riskPct = max > 0 ? (risk / max) * 100 : 0;
-          const oppPct  = max > 0 ? (opp  / max) * 100 : 0;
-          const netIsRisk = net > 100;
-          const netIsOpp  = net < -100;
-
-          return (
-            <div
-              key={v.vendor}
-              onClick={() => onSelect && onSelect(v)}
-              onMouseEnter={() => setHoveredVendor(v.vendor)}
-              onMouseLeave={() => setHoveredVendor(null)}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '180px 1fr 110px',
-                alignItems: 'center',
-                gap: 12,
-                padding: '8px 8px',
-                borderBottom: i < top.length - 1 ? '1px solid #F2F0EE' : 'none',
-                cursor: onSelect ? 'pointer' : 'default',
-                borderRadius: 4,
-                background: hoveredVendor === v.vendor ? '#F4F6FF' : 'transparent',
-                transition: 'background 0.12s',
-              }}
-            >
-              {/* Vendor name */}
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1F3C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vendor}>
-                {v.vendor}
-              </span>
-
-              {/* Diverging bars */}
-              <div style={{ display: 'grid', gridTemplateColumns: '44px calc(50% + 4px) calc(50% - 48px) 44px', gap: 0, alignItems: 'center', height: 28 }}>
-                {/* Risk label */}
-                <span style={{ fontSize: 9, fontWeight: 700, color: '#C03A3A', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', textAlign: 'right', paddingRight: 4, opacity: risk > 100 ? 1 : 0 }}>{risk > 100 ? fmt.k(risk) : ''}</span>
-                {/* Risk bar (right-aligned) */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', height: 28, paddingRight: 1 }}>
-                  {risk > 100 && <div style={{ width: `${riskPct}%`, height: 20, background: '#C03A3A', borderRadius: '3px 0 0 3px', flexShrink: 0 }} />}
-                </div>
-                {/* Opp bar (left-aligned) */}
-                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', height: 28, paddingLeft: 1, borderLeft: '1px solid #D0CEC8' }}>
-                  {opp > 100 && <div style={{ width: `${oppPct}%`, height: 20, background: '#1F7A4D', borderRadius: '0 3px 3px 0', flexShrink: 0 }} />}
-                </div>
-                {/* Opp label */}
-                <span style={{ fontSize: 9, fontWeight: 700, color: '#1F7A4D', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', paddingLeft: 4, opacity: opp > 100 ? 1 : 0 }}>{opp > 100 ? fmt.k(opp) : ''}</span>
+        ].map((k, i) => (
+          <div key={i} className="kpi-flip" style={{ borderLeft: i > 0 ? `1px solid ${OV.border}` : 'none', height: 128 }}>
+            <div className="kpi-flip-inner">
+              <div className="kpi-flip-front">
+                <OvEyebrow text={k.label} />
+                <div style={{
+                  fontFamily: OV.serif, fontWeight: 600, fontSize: 40, lineHeight: 1,
+                  letterSpacing: '-0.01em', color: OV.navy, fontVariantNumeric: 'tabular-nums',
+                }}>{k.val}</div>
               </div>
-
-              {/* Net value */}
-              <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                <span style={{ fontSize: 10, color: '#B0ADA9', marginRight: 3 }}>Net</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: netIsRisk ? '#C03A3A' : netIsOpp ? '#1F7A4D' : '#9E9B97', fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.abs(net) > 100 ? fmt.signed2(net) : '—'}
-                </span>
+              <div className="kpi-flip-back">
+                <div style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.2em',
+                  textTransform: 'lowercase', color: 'rgba(255,255,255,0.45)',
+                  marginBottom: 10, fontFamily: OV.serif,
+                }}>{k.label}</div>
+                <div style={{
+                  fontSize: 15, fontWeight: 500, color: 'rgba(255,255,255,0.9)',
+                  lineHeight: 1.35, fontFamily: OV.sans,
+                }}>{k.sub}</div>
+                <div style={{
+                  marginTop: 14, fontFamily: OV.serif, fontWeight: 600, fontSize: 24,
+                  color: 'rgba(255,255,255,0.28)', fontVariantNumeric: 'tabular-nums',
+                  letterSpacing: '-0.01em',
+                }}>{k.val}</div>
               </div>
             </div>
-          );
-        })}
-      </div>
-
-      {/* Center $0 label */}
-      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 110px', gap: 12, marginTop: 6 }}>
-        <div />
-        <div style={{ position: 'relative', fontSize: 10, color: '#B0ADA9' }}>
-          <span style={{ position: 'absolute', left: 'calc(50% + 48px)', transform: 'translateX(-50%)' }}>$0</span>
-        </div>
-        <div />
-      </div>
-    </div>
-  );
-}
-
-// ── Annual Budget vs YTD Actuals vs Remaining Forecast – Top 10 ──────────
-function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
-  const [hoveredVendor, setHoveredVendor] = useStateV(null);
-  const top = useMemoV(() => {
-    return [...vendors]
-      .filter(v => isRealVendor(v.vendor))
-      .sort((a, b) => (b.budget || 0) - (a.budget || 0))
-      .slice(0, n);
-  }, [vendors, n]);
-
-  const max = top[0] ? (top[0].budget || 0) : 1;
-
-  const SERIES = [
-    { key: 'budget',    label: 'annual budget',       color: '#333C66' },
-    { key: 'actuals',   label: 'ytd actuals spend',   color: '#6699FF' },
-    { key: 'remaining', label: 'remaining forecast',  color: '#E8873A' },
-  ];
-
-  return (
-    <div className="card" style={{ padding: '24px 28px', marginBottom: 20 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 700, color: '#1A1F3C', marginBottom: 3 }}>
-            Annual Budget vs YTD Actuals Spend vs Remaining Forecast – Top 10 Vendors
           </div>
-          <div style={{ fontSize: 11, color: '#9E9B97' }}>Top 10 vendors ranked by Annual Budget · descending</div>
-        </div>
-        <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#807E7A', flexShrink: 0, alignItems: 'center' }}>
-          {SERIES.map(s => (
-            <span key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 12, height: 10, background: s.color, display: 'inline-block', borderRadius: 1 }}></span>
-              {s.label}
-            </span>
-          ))}
+        ))}
+      </div>
+
+      {/* ══ ROW 2 — STACKED OPP/RISK + NET ════════════════════════════ */}
+      <div style={{
+        ...CARD, ...MB20,
+        display: 'grid', gridTemplateColumns: '1fr 1fr',
+        maxWidth: 860, margin: '0 auto 20px',
+      }}>
+
+        {/* Left column: Net Opp/Risk Position (full height) */}
+        <button
+          onClick={() => setOpenPanel({ type: 'net' })}
+          style={{
+            padding: '28px 28px 24px', background: OV.navy, border: 'none', borderRight: `1px solid rgba(255,255,255,0.15)`,
+            textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit',
+            transition: 'filter 0.12s', width: '100%', display: 'flex',
+            flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+          }}
+          onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.15)'}
+          onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+        >
+          <OvEyebrow text="net risk/(opportunity)" light />
+          <div style={{
+            fontFamily: OV.serif, fontWeight: 600, fontSize: 36, lineHeight: 1,
+            letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums',
+            color: kpi.net > 0 ? '#E87878' : '#72D4A0',
+          }}>{fmt.m(Math.abs(kpi.net))}</div>
+          <div style={{ fontSize: 12, fontWeight: 500, marginTop: 9, color: kpi.net > 0 ? '#E87878' : '#72D4A0' }}>
+            {kpi.net > 0 ? '\u25bc\u2002net unfavorable' : '\u25b2\u2002net favorable'}
+          </div>
+          <div style={{ marginTop: 10, fontSize: 11, color: 'rgba(255,255,255,0.5)',
+            display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            explore variance
+          </div>
+        </button>
+
+        {/* Right column: Opportunity (top) + Risk (bottom) stacked */}
+        <div style={{ display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${OV.border}` }}>
+
+          {/* Opportunities */}
+          <button
+            onClick={() => setOpenPanel({ type: 'opp' })}
+            style={{
+              flex: 1, padding: '24px 28px 20px',
+              borderTop: `3px solid ${OV.green}`,
+              borderRight: 'none', borderLeft: 'none',
+              borderBottom: `1px solid ${OV.border}`,
+              background: 'transparent', textAlign: 'center', cursor: 'pointer',
+              fontFamily: 'inherit', transition: 'background 0.12s', width: '100%',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#EAF4EE'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <OvEyebrow text="opportunities" />
+            <div style={{
+              fontFamily: OV.serif, fontWeight: 600, fontSize: 32, lineHeight: 1,
+              letterSpacing: '-0.01em', color: OV.green, fontVariantNumeric: 'tabular-nums',
+            }}>{fmt.m(kpi.opp)}</div>
+            <div style={{ fontSize: 12, color: OV.stone, marginTop: 8 }}>favorable upside</div>
+            <div style={{ marginTop: 8, fontSize: 11, color: OV.green, opacity: 0.65,
+              display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              investigate
+            </div>
+          </button>
+
+          {/* Risk */}
+          <button
+            onClick={() => setOpenPanel({ type: 'risk' })}
+            style={{
+              flex: 1, padding: '24px 28px 20px',
+              borderTop: `3px solid ${OV.red}`,
+              borderRight: 'none', borderLeft: 'none', borderBottom: 'none',
+              background: 'transparent', textAlign: 'center', cursor: 'pointer',
+              fontFamily: 'inherit', transition: 'background 0.12s', width: '100%',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#FBEDED'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <OvEyebrow text="risk" />
+            <div style={{
+              fontFamily: OV.serif, fontWeight: 600, fontSize: 32, lineHeight: 1,
+              letterSpacing: '-0.01em', color: OV.red, fontVariantNumeric: 'tabular-nums',
+            }}>{fmt.m(kpi.risk)}</div>
+            <div style={{ fontSize: 12, color: OV.stone, marginTop: 8 }}>downside exposure</div>
+            <div style={{ marginTop: 8, fontSize: 11, color: OV.red, opacity: 0.65,
+              display: 'flex', alignItems: 'center', gap: 4, letterSpacing: '0.04em' }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              investigate
+            </div>
+          </button>
+
         </div>
       </div>
 
-      {/* Rows */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {top.map((v, i) => {
-          const budget    = v.budget || 0;
-          const actuals   = v.actual || 0;
-          const remaining = Math.max(0, (v.forecast || 0) - actuals);
-          const vals      = [budget, actuals, remaining];
+      {/* ══ ROW 4 — DRIVERS OF FORECAST VARIANCE ═══════════════════════ */}
+      <div style={{ ...CARD, overflow: 'hidden' }}>
 
-          return (
-            <div
-              key={v.vendor}
-              onClick={() => onSelect && onSelect(v)}
-              onMouseEnter={() => setHoveredVendor(v.vendor)}
-              onMouseLeave={() => setHoveredVendor(null)}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '190px 1fr 170px',
-                alignItems: 'center',
-                gap: 16,
-                padding: '10px 8px',
-                borderBottom: i < top.length - 1 ? '1px solid #F2F0EE' : 'none',
-                cursor: onSelect ? 'pointer' : 'default',
-                borderRadius: 4,
-                background: hoveredVendor === v.vendor ? '#F4F6FF' : 'transparent',
-                transition: 'background 0.12s',
-              }}>
-              {/* Vendor name */}
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1F3C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vendor}>
-                {v.vendor}
+        {/* Chart panel */}
+        <div style={{ padding: '32px 44px 0' }}>
+
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
+            <div>
+              <OvEyebrow text="risk and opportunity · by category" />
+              <div style={{ fontFamily: OV.serif, fontWeight: 600, fontSize: 20, color: OV.navy, letterSpacing: '-0.005em' }}>
+                Risk and Opportunity by Category
+              </div>
+              <div style={{ fontSize: 12, color: OV.stone, marginTop: 5, fontFamily: OV.sans }}>
+                Gross downside exposure and favorable upside by category. Totals reconcile to the KPI cards above.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'center', paddingTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 10, height: 10, background: OV.green, borderRadius: 1 }} />
+                <span style={{ fontSize: 11, color: OV.stone }}>← Opportunity</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 10, height: 10, background: OV.red, borderRadius: 1 }} />
+                <span style={{ fontSize: 11, color: OV.stone }}>Risk →</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', marginBottom: 4, paddingLeft: 160 }}>
+            <div style={{ flex: 1, textAlign: 'right', paddingRight: 8, fontSize: 9,
+              letterSpacing: '0.18em', textTransform: 'uppercase',
+              color: OV.green, fontFamily: OV.sans, fontWeight: 600 }}>← opportunity</div>
+            <div style={{ width: 2, flexShrink: 0 }} />
+            <div style={{ flex: 1, paddingLeft: 8, fontSize: 9,
+              letterSpacing: '0.18em', textTransform: 'uppercase',
+              color: OV.red, fontFamily: OV.sans, fontWeight: 600 }}>risk →</div>
+          </div>
+          <div style={{ height: 1, background: OV.border, marginLeft: 160 }} />
+
+          {cats.map(({ cat, risk, opp }) => {
+            const isSel     = sel === cat;
+            const hasRisk   = risk > 500;
+            const hasOpp    = opp  > 500;
+            const drillable = hasRisk || hasOpp;
+            const riskPct   = hasRisk ? (risk / ovMaxBar) * 80 : 0;
+            const oppPct    = hasOpp  ? (opp  / ovMaxBar) * 80 : 0;
+
+            return (
+              <div key={cat}
+                onClick={() => drillable && setSel(isSel ? null : cat)}
+                style={{
+                  display: 'flex', alignItems: 'center', height: 56,
+                  borderBottom: '1px solid #F0EEEB',
+                  cursor: drillable ? 'pointer' : 'default',
+                  background: isSel ? '#F5F4F1' : 'transparent',
+                  transition: 'background 0.12s',
+                  marginLeft: -44, marginRight: -44,
+                  paddingLeft: 44, paddingRight: 44,
+                }}
+                onMouseEnter={e => { if (drillable && !isSel) e.currentTarget.style.background = '#F8F7F5'; }}
+                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <div style={{ width: 160, flexShrink: 0, fontSize: 14, fontWeight: isSel ? 600 : 400,
+                  color: isSel ? OV.navy : '#3C3A36',
+                  display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {cat}
+                  {drillable && !isSel && <span style={{ fontSize: 9, color: OV.stone, opacity: 0.4 }}>›</span>}
+                  {isSel && <span style={{ fontSize: 9, color: OV.navy, opacity: 0.5 }}>▾</span>}
+                </div>
+
+                {/* Opportunity — green, extends left */}
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingRight: 3 }}>
+                  {hasOpp && (<>
+                    <div style={{ fontSize: 12, color: OV.green, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                      {fmt.k(opp)}
+                    </div>
+                    <div style={{ height: 22, width: `${oppPct}%`, background: OV.green,
+                      borderRadius: '3px 0 0 3px', transition: 'width 0.3s ease' }} />
+                  </>)}
+                </div>
+
+                <div style={{ width: 2, height: 40, background: '#D4D2CE', flexShrink: 0 }} />
+
+                {/* Risk — red, extends right */}
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 6, paddingLeft: 3 }}>
+                  {hasRisk && (<>
+                    <div style={{ height: 22, width: `${riskPct}%`, background: OV.red,
+                      borderRadius: '0 3px 3px 0', transition: 'width 0.3s ease' }} />
+                    <div style={{ fontSize: 12, color: OV.red, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                      {fmt.k(risk)}
+                    </div>
+                  </>)}
+                  {!hasRisk && !hasOpp && <span style={{ fontSize: 12, color: '#C8C6C2', paddingLeft: 4 }}>—</span>}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Footer totals */}
+          <div style={{
+            display: 'flex', justifyContent: 'flex-end', gap: 32, alignItems: 'center',
+            paddingTop: 14, paddingBottom: 2, marginTop: 6,
+            borderTop: '1px solid #EDECEA',
+          }}>
+            <div style={{ fontSize: 11, color: OV.stone, fontFamily: OV.sans }}>
+              {'Total Opportunity: '}
+              <span style={{ color: OV.green, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                {fmt.m(cats.reduce((s, c) => s + c.opp, 0))}
               </span>
+            </div>
+            <div style={{ fontSize: 11, color: OV.stone, fontFamily: OV.sans }}>
+              {'Total Risk: '}
+              <span style={{ color: OV.red, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                {fmt.m(cats.reduce((s, c) => s + c.risk, 0))}
+              </span>
+            </div>
+          </div>
+        </div>
 
-              {/* Bars */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {SERIES.map((s, si) => {
-                  const pct = max > 0 ? Math.min((vals[si] / max) * 100, 100) : 0;
+        {/* Drill-down panel */}
+        <div style={{ borderTop: `1px solid ${OV.border}`, background: OV.bg, minHeight: 72 }}>
+
+          {!sel && (
+            <div style={{ padding: '24px 44px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#ECEAE7',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#999"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 13, color: OV.stone }}>
+                Select a category above to view contributing vendors, contracts, and projects.
+              </div>
+            </div>
+          )}
+
+          {sel && (
+            <div style={{ padding: '28px 44px 32px' }}>
+
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontFamily: OV.serif, fontWeight: 800, fontSize: 10,
+                    letterSpacing: '0.22em', textTransform: 'lowercase',
+                    color: OV.stone, marginBottom: 8 }}>
+                    {sel === 'FPC' ? 'fixed price contracts' : `${sel.toLowerCase()} · variance drilldown`}
+                  </div>
+                  <div style={{ fontFamily: OV.serif, fontWeight: 600, fontSize: 18, color: OV.navy, marginBottom: 4 }}>
+                    {sel} — Variance Detail
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
+                    fontFamily: OV.sans, color: drillCatV < 0 ? OV.green : OV.red }}>
+                    {drillCatV < 0 ? '\u2212' : '+'}{fmt.m(Math.abs(drillCatV))}
+                    {'\u2002'}net {drillCatV < 0 ? 'favorable' : 'unfavorable'}
+                  </div>
+                </div>
+                <button onClick={() => { setSel(null); setSelVendorDrill(null); }}
+                  style={{ padding: '5px 12px', background: 'none', border: `1px solid ${OV.border}`,
+                    fontSize: 12, color: OV.stone, cursor: 'pointer', fontFamily: OV.sans }}>
+                  ✕ close
+                </button>
+              </div>
+
+              {/* Inline waterfall */}
+              {drillVendorsData.wfSteps.length > 0 && (
+                <div style={{ marginBottom: 24, marginLeft: -44, marginRight: -44,
+                  paddingLeft: 44, paddingRight: 44, paddingBottom: 20,
+                  borderBottom: `1px solid ${OV.border}` }}>
+                  <div style={{ fontFamily: OV.serif, fontWeight: 800, fontSize: 10,
+                    letterSpacing: '0.22em', textTransform: 'lowercase',
+                    color: OV.stone, marginBottom: 12, marginTop: 8 }}>budget to forecast</div>
+                  <OvCatWaterfall
+                    catBudget={drillVendorsData.catBudget}
+                    catForecast={drillVendorsData.catForecast}
+                    wfSteps={drillVendorsData.wfSteps}
+                  />
+                </div>
+              )}
+
+              {/* Vendor / contract table */}
+              {drillVendorsData.vendors.length > 0 ? (<>
+                <div style={{ fontFamily: OV.serif, fontWeight: 800, fontSize: 10,
+                  letterSpacing: '0.22em', textTransform: 'lowercase',
+                  color: OV.stone, marginBottom: 10 }}>
+                  {sel === 'FPC' ? 'contract detail' : 'vendor detail'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px 96px 96px',
+                  padding: '0 0 7px', borderBottom: `1px solid ${OV.border}`,
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
+                  color: OV.stone, fontFamily: OV.sans, marginBottom: 2 }}>
+                  <span>{sel === 'FPC' ? 'Project' : 'Vendor'}</span>
+                  <span style={{ textAlign: 'right' }}>Budget</span>
+                  <span style={{ textAlign: 'right' }}>Forecast</span>
+                  <span style={{ textAlign: 'right' }}>Variance</span>
+                </div>
+                {drillVendorsData.vendors.map((v, vi) => {
+                  const vFav     = v.variance < 0;
+                  const vCol     = vFav ? OV.green : OV.red;
+                  const isExpand = selVendorDrill === v.name;
+                  const ctracts  = v.contracts
+                    .map(c => ({ ...c, variance: c.forecast - c.budget }))
+                    .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
                   return (
-                    <div key={s.key} style={{ height: 10, background: '#EDECEA', borderRadius: 2, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: s.color, borderRadius: 2, transition: 'width 0.3s ease' }} />
+                    <div key={v.name}>
+                      <div
+                        onClick={() => setSelVendorDrill(isExpand ? null : v.name)}
+                        style={{ display: 'grid', gridTemplateColumns: '1fr 96px 96px 96px',
+                          padding: '9px 0', borderBottom: '1px solid #F0EEEB',
+                          cursor: 'pointer', transition: 'background 0.1s',
+                          background: isExpand ? '#F5F4F1' : 'transparent',
+                          marginLeft: -44, marginRight: -44, paddingLeft: 44, paddingRight: 44,
+                        }}
+                        onMouseEnter={e => { if (!isExpand) e.currentTarget.style.background = '#F8F7F5'; }}
+                        onMouseLeave={e => { if (!isExpand) e.currentTarget.style.background = 'transparent'; }}>
+                        <span style={{ fontSize: 13, color: isExpand ? OV.navy : '#3C3A36',
+                          fontWeight: isExpand ? 600 : 400, display: 'flex', alignItems: 'center', gap: 5 }}>
+                          {v.name}
+                          <span style={{ fontSize: 9, color: OV.stone, opacity: 0.5 }}>{isExpand ? '\u25be' : '\u203a'}</span>
+                        </span>
+                        <span style={{ fontSize: 12, color: OV.stone, textAlign: 'right',
+                          fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>{fmt.m(v.budget)}</span>
+                        <span style={{ fontSize: 12, color: OV.stone, textAlign: 'right',
+                          fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>{fmt.m(v.forecast)}</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: vCol, textAlign: 'right',
+                          fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                          {vFav ? '\u2212' : '+'}{fmt.k(Math.abs(v.variance))}
+                        </span>
+                      </div>
+                      {isExpand && ctracts.length > 0 && (
+                        <div style={{ background: '#F5F4F1', padding: '12px 44px 14px',
+                          borderBottom: `1px solid ${OV.border}`, marginLeft: -44, marginRight: -44 }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.14em',
+                            textTransform: 'uppercase', color: OV.stone,
+                            fontFamily: OV.sans, marginBottom: 8 }}>Contract / Project Detail</div>
+                          {ctracts.map((c, ci) => {
+                            const cFav = c.variance < 0;
+                            const cCol = cFav ? OV.green : OV.red;
+                            return (
+                              <div key={ci} style={{ marginBottom: 8, paddingBottom: 8,
+                                borderBottom: ci < ctracts.length - 1 ? '1px solid #ECEAE7' : 'none' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px 96px 96px' }}>
+                                  <span style={{ fontSize: 12, color: '#3C3A36', paddingRight: 10,
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {c.name}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: OV.stone, textAlign: 'right',
+                                    fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                                    {fmt.m(c.budget)}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: OV.stone, textAlign: 'right',
+                                    fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                                    {fmt.m(c.forecast)}
+                                  </span>
+                                  <span style={{ fontSize: 11, fontWeight: 600, color: cCol, textAlign: 'right',
+                                    fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
+                                    {cFav ? '\u2212' : '+'}{fmt.k(Math.abs(c.variance))}
+                                  </span>
+                                </div>
+                                {c.notes && (
+                                  <div style={{ fontSize: 11, color: OV.stone, lineHeight: 1.5,
+                                    marginTop: 3, fontStyle: 'italic' }}>{c.notes}</div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
-              </div>
-
-              {/* Values */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
-                {SERIES.map((s, si) => (
-                  <span key={s.key} style={{ fontSize: 11, fontWeight: 700, color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
-                    {fmt.m2(vals[si])}
-                  </span>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Top Vendors ranked bar chart ─────────────────────────────────────────
-function VendorRankChart({ vendors, sortKey, title, subtitle, n = 10 }) {
-  const top = useMemoV(() => {
-    return [...vendors]
-      .filter(v => isRealVendor(v.vendor))
-      .sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0))
-      .slice(0, n);
-  }, [vendors, sortKey, n]);
-
-  const max = top[0] ? (top[0][sortKey] || 0) : 1;
-
-  return (
-    <div className="card" style={{ padding:'24px 28px', flex:'1 1 0', minWidth:0 }}>
-      <div style={{ marginBottom:20 }}>
-        <div style={{ fontFamily:'var(--font-serif)', fontSize:16, fontWeight:700, color:'#1A1F3C', marginBottom:3 }}>{title}</div>
-        <div style={{ fontSize:11, color:'#9E9B97' }}>{subtitle}</div>
-      </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
-        {top.map((v, i) => {
-          const val = v[sortKey] || 0;
-          const pct = max > 0 ? (val / max) * 100 : 0;
-          return (
-            <div key={v.vendor} style={{ display:'grid', gridTemplateColumns:'32px 1fr auto', alignItems:'center', gap:12, padding:'9px 0', borderBottom: i < top.length-1 ? '1px solid #F2F0EE' : 'none' }}>
-              <span style={{ fontSize:11, color:'#C8C6C0', fontWeight:700, fontVariantNumeric:'tabular-nums', letterSpacing:'0.04em' }}>
-                {String(i+1).padStart(2,'0')}
-              </span>
-              <div style={{ display:'grid', gridTemplateColumns:'160px 1fr', alignItems:'center', gap:10 }}>
-                <span style={{ fontSize:12, fontWeight:500, color:'#1A1F3C', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }} title={v.vendor}>
-                  {v.vendor}
-                </span>
-                <div style={{ height:8, background:'#EDECEA', borderRadius:2, overflow:'hidden' }}>
-                  <div style={{ height:'100%', width:`${pct}%`, background:'#333C66', borderRadius:2, transition:'width 0.3s ease' }} />
+              </>) : (
+                <div style={{ fontSize: 13, color: OV.stone, fontStyle: 'italic' }}>
+                  No vendor detail available for {sel}.
                 </div>
-              </div>
-              <span style={{ fontSize:12, fontWeight:700, color:'#1A1F3C', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', minWidth:52, textAlign:'right' }}>
-                {fmt.m2(val)}
-              </span>
+              )}
             </div>
-          );
-        })}
+          )}
+
+        </div>
       </div>
+
+      {/* ── KPI Drill Panels ─────────────────────────────────────────── */}
+      {openPanel?.type === 'risk'     && <KPIDrillPanel mode="risk" rawData={dynRisk} onClose={() => setOpenPanel(null)} />}
+      {openPanel?.type === 'opp'      && <KPIDrillPanel mode="opp"  rawData={dynOpp}  onClose={() => setOpenPanel(null)} />}
+      {openPanel?.type === 'net'      && <NetDrillPanel             rawData={dynNet}  onClose={() => setOpenPanel(null)} />}
+      {openPanel?.type === 'variance' && <VarianceExplorerPanel varData={buildVarData(items)} initialCat={openPanel.initialCat || null} onClose={() => setOpenPanel(null)} />}
+
+
     </div>
   );
 }
 
-window.VendorsTab = VendorsTab;
+// ── buildVarData ──────────────────────────────────────────────────────────────
+// Builds the category → vendor → contract hierarchy expected by VarianceExplorerPanel
+// from live lineItems (same workbook-scoped set used by all other components).
+// Pass as varData={buildVarData(items)} when rendering VarianceExplorerPanel.
+function buildVarData(lineItems) {
+  const byCat = {};
+  for (const li of lineItems) {
+    const cat    = ovCat(li);
+    const vendor = li.vendor || '(unspecified)';
+    const appPfx = li.application && li.application !== 'N/A' && li.application.trim()
+      ? li.application + ' \u2014 ' : '';
+    const cName  = (appPfx + (li.project || '')).slice(0, 80) || vendor;
+    if (!byCat[cat]) byCat[cat] = {};
+    if (!byCat[cat][vendor]) byCat[cat][vendor] = { variance: 0, contracts: [] };
+    byCat[cat][vendor].variance += (li.forecast || 0) - (li.budget || 0);
+    byCat[cat][vendor].contracts.push({
+      name:     cName,
+      budget:   li.budget     || 0,
+      forecast: li.forecast   || 0,
+      actual:   li.actual     || 0,
+      risk:     li.risk       || 0,
+      opp:      li.opp        || 0,
+      notes:    li.notes      || '',
+      monthly:  li.monthlyFC  || new Array(12).fill(0),
+    });
+  }
+  return OV_CATS
+    .map(cat => {
+      const vm = byCat[cat] || {};
+      const vendors = Object.entries(vm)
+        .map(([name, d]) => ({
+          name,
+          variance: Math.round(d.variance),
+          contracts: d.contracts.sort((a, b) => Math.abs(b.forecast - b.budget) - Math.abs(a.forecast - a.budget)),
+        }))
+        .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+      return { cat, variance: vendors.reduce((s, v) => s + v.variance, 0), vendors };
+    })
+    .filter(c => c.vendors.length > 0);
+}
+
+Object.assign(window, { OverviewTab, buildVarData, OvFilterDrop });

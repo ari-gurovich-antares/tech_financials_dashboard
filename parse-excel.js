@@ -1,849 +1,2343 @@
-// Parse a 2026 Tech Financials Excel workbook into the same shape as data/financials.json.
-// Uses SheetJS (loaded via <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.full.min.js">)
-//
-// Returns: { summary, vendors, domainOwners, riskOppLog, lineItems, lookups, _rowCount, _excludedCount }
-// or throws an Error with a friendly message.
+// drill-panels.jsx — Reconciled drill panels
+// Data loaded from drill-data.js (RISK_DATA, OPP_DATA, NET_DATA, FILTER_OPTS)
+const { useState: useStateDR, useEffect: useEffectDR } = React;
+// Color aliases (SunburstView defined in tab-sunburst.jsx, loaded before this file)
+const SB_RED   = '#B23A3A';
+const SB_GREEN = '#2F7A4D';
 
-(function () {
-  // Column header → field. Headers appear in row 0 of "Master Data (DO NOT EDIT)".
-  const HEADERS = {
-    'Transaction Type': 'transactionType',
-    'D365 Legal Vendor name': 'vendor',
-    'DBA / AKA / Passthrough': 'vendorDba',
-    'Project ID': 'projectId',
-    'Project Name': 'project',
-    'Domain': 'domain',
-    'Domain Owner': 'owner',
-    'Application': 'application',
-    'Project Details': 'projectDetails',
-    'Category': 'category',
-    'Sub-Category1': 'subCategory',
-    'Contract Type': 'contractType',
-    'MGMT View Category (OneStream)': 'onestreamCategory',
-    'Accounting Treatment': 'treatment',
-    '2026 Final Budget': 'budget',
-    '2026 (Actuals + Forecast)': 'forecast',
-    '2026 Opportunity': 'opp',
-    '2026 Risk': 'risk',
-    '2026 Net Position': 'net',
-    'Notes': 'notes',
-    'Total Actuals': 'actual',
-    'Non-Comitted': 'nonCommitted',
-  };
+const DRP_SERIF = "'Source Serif 4', Georgia, serif";
+const DRP_SANS  = "'Inter', Arial, sans-serif";
+const DRP_NAVY  = '#333C66';
+const DRP_RED   = '#B23A3A';
+const DRP_GREEN = '#2F7A4D';
 
-  const MONTHS_AC = ['Jan AC','Feb AC','Mar AC','Apr AC','May AC','Jun AC','Jul AC','Aug AC','Sep AC','Oct AC','Nov AC','Dec AC'];
-  const MONTHS_FC = ['Jan FC','Feb FC','Mar FC','Apr FC','May FC','Jun FC','Jul FC','Aug FC','Sep FC','Oct FC','Nov FC','Dec FC'];
-  const MONTHS_OR = ['Jan Opp/Risk','Feb Opp./Risk','Mar Opp./Risk','Apr Opp./Risk','May Opp./Risk','Jun Opp./Risk','Jul Opp./Risk','Aug Opp./Risk','Sep Opp./Risk','Oct Opp./Risk','Nov Opp./Risk','Dec Opp./Risk'];
-  // Some files may have different punctuation; try a tolerant fallback for OR.
-  const MONTHS_OR_ALT = ['Jan Opp./Risk','Feb Opp/Risk','Mar Opp/Risk','Apr Opp/Risk','May Opp/Risk','Jun Opp/Risk','Jul Opp/Risk','Aug Opp/Risk','Sep Opp/Risk','Oct Opp/Risk','Nov Opp/Risk','Dec Opp/Risk'];
+// Per-category color palette — distinct colors for visual differentiation
+const DRILL_CAT_PALETTE = {
+  'Labor/ T&M':    '#6699FF',
+  'Software':      '#EDAC4B',
+  'MS':            '#B088D4',
+  'Infrastructure':'#5DB8A2',
+  'Hardware':      '#E08070',
+  'OOE':           '#C9B54A',
+  'Amortization':  '#80BCDC',
+  'FPC':           '#72C472',
+};
+// Color utilities for depth-based lightening
+function _drH2H(hex){let r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;if(mx===mn)return[0,0,l*100];const d=mx-mn,s=l>.5?d/(2-mx-mn):d/(mx+mn);let h;switch(mx){case r:h=(g-b)/d+(g<b?6:0);break;case g:h=(b-r)/d+2;break;default:h=(r-g)/d+4;}return[h/6*360,s*100,l*100];}
+function _drH2hex(h,s,l){h/=360;s/=100;l/=100;if(s===0){const v=Math.round(l*255);return'#'+[v,v,v].map(x=>x.toString(16).padStart(2,'0')).join('');}const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q,hr=(t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};return'#'+[h+1/3,h,h-1/3].map(t=>Math.round(hr(t)*255).toString(16).padStart(2,'0')).join('');}
+// depth: 0=category(full strength), 1=vendor(lighter), 2=contract(lightest); idx for subtle per-item variation
+function drillCatColor(cat, depth=0, idx=0) {
+  const base = DRILL_CAT_PALETTE[cat] || '#8899BB';
+  const [h,s,l] = _drH2H(base);
+  return _drH2hex(h, Math.max(18, s - 13*depth - 2.5*idx), Math.min(85, l + 15*depth + 3.5*idx));
+}
+// Diverging color for Net Position bars: negative=favorable(green), positive=unfavorable(red)
+// scale = max absolute value at this level; depth 0=category, 1=vendor, 2=contract
+function netDivColor(amount, scale, depth) {
+  const d   = depth || 0;
+  const abs = Math.abs(amount);
+  const sc  = Math.max(scale, 1);
+  if (abs < sc * 0.03) return `hsl(0,0%,${50 + d*12}%)`; // < 3% of scale → neutral gray
+  const t   = Math.min(1, abs / sc);
+  const fav = amount < 0;
+  const hue = fav ? 138 : 4;
+  const sat = Math.max(18, (fav ? 42 + t*28 : 48 + t*26) - d*10);
+  const lit = Math.min(82, (fav ? 60 - t*24 : 64 - t*28) + d*13);
+  return `hsl(${hue},${sat}%,${lit}%)`;
+}
 
-  const num = (v) => {
-    if (v === null || v === undefined || v === '') return 0;
-    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[, ]/g, ''));
-    return isNaN(n) ? 0 : n;
-  };
-  const str = (v) => v === null || v === undefined ? '' : String(v).trim();
+// ── ReconcBadge: shows sum-vs-total diff at every level ─────────────────
+function ReconcBadge({ parentLabel, parentAmt, childLabel, childAmt, light }) {
+  const diff = Math.abs(parentAmt - childAmt);
+  const ok   = diff < 1.0;
+  const bg   = light ? 'rgba(255,255,255,0.06)' : '#F4F8F0';
+  const col  = ok ? (light ? '#72D4A0' : '#2F7A4D') : '#B23A3A';
+  const txt  = light ? 'rgba(255,255,255,0.5)' : '#807E7A';
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:10, padding:'5px 10px',
+      background:bg, fontSize:11, marginBottom:8, borderRadius:2 }}>
+      <span style={{ color:col, fontWeight:700, fontFamily:DRP_SANS, fontSize:13 }}>
+        {ok ? '✓' : '!'}
+      </span>
+      <span style={{ color:txt }}>
+        {childLabel}:&nbsp;
+        <strong style={{ color:light?'rgba(255,255,255,0.82)':'#333C66', fontVariantNumeric:'tabular-nums' }}>
+          {fmt.m(childAmt)}
+        </strong>
+        &nbsp;
+        {ok ? <span style={{ color:col }}>= {parentLabel} ✓</span>
+             : <span style={{ color:col }}>≠ {parentLabel} (diff: {fmt.k(diff)})</span>}
+      </span>
+    </div>
+  );
+}
 
-  // Returns true when a worksheet cell contains an Excel error (#REF!, #VALUE!,
-  // #N/A, #DIV/0!, etc.).  We must never use error values as financial numbers.
-  function _isErrCell(cell) {
-    if (!cell) return false;
-    if (cell.t === 'e') return true;                         // SheetJS error type
-    const s = String(cell.v == null ? '' : cell.v);
-    return /^#(REF!|VALUE!|NAME\?|NUM!|DIV\/0!|N\/A|NULL!)/.test(s);
-  }
+// ── HBar: horizontal bar row ─────────────────────────────────────────────
+function HBar({ label, amount, maxAmt, color, bgTrack, onClick, selected, signed, leftAccent }) {
+  const pct  = maxAmt > 0 ? (Math.abs(amount) / maxAmt) * 76 : 0;
+  const fav  = amount < 0;
+  const col  = color || (fav ? DRP_GREEN : DRP_RED);
+  const sign = signed ? (fav ? '−' : '+') : '';
+  return (
+    <div onClick={onClick}
+      style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0 10px 10px',
+        borderBottom:'1px solid rgba(255,255,255,0.07)',
+        borderLeft: leftAccent ? `3px solid ${leftAccent}` : '3px solid transparent',
+        cursor:onClick?'pointer':'default',
+        background:selected?'rgba(102,153,255,0.1)':'transparent',
+        transition:'background 0.1s' }}>
+      <div style={{ width:190, fontSize:13, color:selected?'#fff':'rgba(255,255,255,0.85)',
+        fontWeight:selected?600:400, flexShrink:0, display:'flex', alignItems:'center', gap:5 }}>
+        {label}
+        {onClick && !selected && <span style={{ fontSize:10, opacity:0.3 }}>›</span>}
+      </div>
+      <div style={{ flex:1 }}>
+        <div style={{ height:18, background:bgTrack||'rgba(255,255,255,0.07)', borderRadius:2, position:'relative' }}>
+          <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${pct}%`,
+            background:col, opacity:0.75, borderRadius:2, transition:'width 0.3s' }} />
+        </div>
+      </div>
+      <div style={{ width:80, textAlign:'right', fontSize:13, fontWeight:600,
+        color:col, fontVariantNumeric:'tabular-nums', fontFamily:DRP_SANS, flexShrink:0 }}>
+        {sign}{fmt.k(Math.abs(amount))}
+      </div>
+    </div>
+  );
+}
 
-  function findHeaderRow(rows) {
-    for (let r = 0; r < Math.min(rows.length, 5); r++) {
-      const row = rows[r] || [];
-      if (row.includes('Transaction Type') && row.includes('D365 Legal Vendor name')) return r;
-    }
-    throw new Error('Could not find header row. Expected a row with "Transaction Type" and "D365 Legal Vendor name".');
-  }
 
-  function buildColIndex(headerRow) {
-    const idx = {};
-    headerRow.forEach((h, i) => {
-      const key = str(h);
-      if (key) idx[key] = i;
-    });
-    return idx;
-  }
 
-  function readArr(row, colIdx, names) {
-    const out = new Array(12).fill(0);
-    for (let i = 0; i < 12; i++) {
-      const ci = colIdx[names[i]];
-      if (ci != null) out[i] = num(row[ci]);
-    }
-    return out;
-  }
+// ── KPIDrillPanel: sunburst (left) + analytical drilldown (right) ─────
+function KPIDrillPanel({ mode, rawData, onClose }) {
+  const [selCat,    setSelCat]    = useStateDR(null);
+  const [selVendor, setSelVendor] = useStateDR(null);
 
-  function parseExcelArrayBuffer(arrayBuffer) {
-    if (typeof XLSX === 'undefined') {
-      throw new Error('SheetJS (XLSX) library not loaded. Check <script> tag.');
-    }
-    const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array', cellFormula: true });
-    let sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('master data'));
-    if (!sheetName) {
-      throw new Error(
-        `Sheet "Master Data (DO NOT EDIT)" not found. Found sheets: ${wb.SheetNames.join(', ')}`
-      );
-    }
-    const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
-    if (!rows.length) throw new Error('Master Data sheet is empty.');
+  const pickCat    = c => { setSelCat(c);  setSelVendor(null); };
+  const pickVendor = v => setSelVendor(v);
 
-    const headerRowIdx = findHeaderRow(rows);
-    const colIdx = buildColIndex(rows[headerRowIdx]);
+  const isRisk  = mode === 'risk';
+  // Always use dynamically built hierarchy from uploaded workbook lineItems.
+  // Empty fallback ensures no stale drill-data.js constant is ever served.
+  if (!rawData) console.warn('[KPIDrillPanel] WARNING: static fallback data used — uploaded workbook data was not provided.');
+  const raw     = rawData || { total: 0, categories: [] };
+  const sign    = isRisk ? '+' : '−';
+  const accent  = isRisk ? SB_RED : SB_GREEN;
+  const hdBg    = isRisk ? '#5A1E1E' : '#1A4A2A';
+  const bodyBg  = isRisk ? '#18100E' : '#0E1812';
+  const eyebrow = isRisk ? 'risk · downside exposure' : 'opportunities · favorable upside';
+  const kpiLbl  = isRisk ? 'Total Risk' : 'Total Opportunity';
 
-    // ── Robust Non-Committed column detection ─────────────────────────────
-    // Normalize: lowercase + strip ALL whitespace, hyphens, underscores, punctuation.
-    // Handles: Non-Comitted, Non-Committed, Non Comitted, noncommitted, etc.
-    const _normHdr = h => String(h || '').toLowerCase().replace(/[\s\-_.,;:'"()\\/]+/g, '');
-    const _NC_NORMS = new Set(['noncomitted', 'noncommitted', 'noncomited', 'noncommited']);
-    // First try exact HEADERS-map key, then fuzzy scan.
-    let _ncColIdx = (colIdx['Non-Comitted'] != null) ? colIdx['Non-Comitted'] : null;
-    let _ncRawHdr = _ncColIdx != null ? 'Non-Comitted' : null;
-    if (_ncColIdx == null) {
-      for (const [hdr, ci] of Object.entries(colIdx)) {
-        if (_NC_NORMS.has(_normHdr(hdr))) { _ncColIdx = ci; _ncRawHdr = hdr; break; }
-      }
-    }
-    console.log('[parse] Non-Committed column detected: "' + (_ncRawHdr || 'NOT FOUND') + '" → col index ' + _ncColIdx);
+  const items = raw.categories.map(c => ({
+    cat: c.cat, variance: isRisk ? c.amount : -c.amount,
+    vendors: c.vendors.map(v => ({
+      name: v.name, variance: isRisk ? v.amount : -v.amount,
+      contracts: v.contracts.map(ct => ({ name:ct.name, variance:isRisk?ct.amount:-ct.amount, notes:ct.notes })),
+    })),
+  }));
 
-    // Sanity: required columns
-    const required = ['Transaction Type', 'D365 Legal Vendor name', '2026 Final Budget', 'Total Actuals'];
-    const missing = required.filter(h => !(h in colIdx));
-    if (missing.length) throw new Error(`Missing columns in Master Data: ${missing.join(', ')}`);
+  const catData    = selCat    ? raw.categories.find(c=>c.cat===selCat)         : null;
+  const vendorData = selVendor ? catData?.vendors.find(v=>v.name===selVendor)   : null;
+  const maxCat     = raw.categories.length ? Math.max(...raw.categories.map(c=>c.amount),1) : 1;
+  const maxVend    = catData?.vendors.length ? Math.max(...catData.vendors.map(v=>v.amount),1) : 1;
+  const maxContr   = vendorData?.contracts.length ? Math.max(...vendorData.contracts.map(c=>Math.abs(c.amount)),1) : 1;
+  const catSum     = raw.categories.reduce((s,c)=>s+c.amount,0);
+  const vendorSum  = catData ? catData.vendors.reduce((s,v)=>s+v.amount,0) : 0;
+  const contrSum   = vendorData ? vendorData.contracts.reduce((s,c)=>s+c.amount,0) : 0;
 
-    // Resolve OR header set — some files use one variant, some the other. Build a tolerant resolver.
-    const resolvedOR = MONTHS_OR.map((m, i) => {
-      if (m in colIdx) return m;
-      if (MONTHS_OR_ALT[i] in colIdx) return MONTHS_OR_ALT[i];
-      // Last-ditch: find any header starting with month abbrev + "Opp"
-      const abbrev = m.slice(0, 3);
-      const found = Object.keys(colIdx).find(k => k.startsWith(abbrev) && /Opp/.test(k));
-      return found || m; // may end up missing → array will have 0
-    });
+  const diff = Math.abs(raw.total - catSum);
 
-    // ════════════════════════════════════════════════════════════════════════
-    // ROW INCLUSION RULE
-    // ════════════════════════════════════════════════════════════════════════
-    //
-    // The dashboard dataset is scoped to exactly the same rows as the
-    // workbook SUBTOTAL formula found in the Master Data sheet.
-    //
-    // How it works (automatic, no hardcoded row numbers):
-    //
-    //   1. Pre-scan: locate the SUBTOTAL summary row (identified by having no
-    //      Transaction Type, no Category, and no Sub-Category).
-    //
-    //   2. Read the formula stored in its Budget cell, e.g.:
-    //        =SUBTOTAL(9, V2:V140)
-    //      Extract the upper bound of the range (140 in this example).
-    //
-    //   3. Restrict all data processing to Excel rows within that range.
-    //      Any row whose Excel row number exceeds the upper bound is excluded.
-    //
-    //   4. Read the SUBTOTAL cell values as the authoritative KPI totals
-    //      (stored as workbookSubtotal). These are used directly for all
-    //      headline KPI cards when no filters are active, guaranteeing that
-    //      Dashboard values = Workbook SUBTOTAL values.
-    //
-    // Why this matters:
-    //   The workbook may contain rows AFTER the SUBTOTAL formula range
-    //   (e.g. adjustment rows, draft entries, reconciling items) that the
-    //   Finance team intentionally excluded from reporting. By scoping to
-    //   the formula range, the dashboard automatically mirrors the same
-    //   boundary the analyst set in the workbook.
-    //
-    // If the workbook changes:
-    //   • Rows added WITHIN the formula range (e.g. V2:V141) → included.
-    //   • SUBTOTAL formula range extended (e.g. V2:V155) → dashboard extends.
-    //   • SUBTOTAL formula range shrunk → dashboard shrinks.
-    //   No code change required.
-    //
-    // Fallback (if formula string is unavailable):
-    //   Accumulate the budget column row-by-row until the running total
-    //   matches workbookSubtotal.budget (within $1). The row where the match
-    //   occurs is used as the upper bound. This handles cases where the
-    //   Excel file stores only the computed value, not the formula string.
-    // ════════════════════════════════════════════════════════════════════════
+  return (
+    <div className="drill-overlay" onClick={onClose}>
+      <div className="drill-panel drill-panel-wide" onClick={e=>e.stopPropagation()}
+        style={{ display:'flex', flexDirection:'column', background:bodyBg, overflow:'hidden' }}>
 
-    // subtotalRangeEnd: the last Excel row number covered by the SUBTOTAL formula.
-    // null means no SUBTOTAL row was found; all rows will be processed.
-    let subtotalRangeEnd = null;
-    let workbookSubtotal = null;  // Authoritative KPI values from the SUBTOTAL row
+        {/* Header */}
+        <div style={{ background:hdBg, padding:'18px 24px', flexShrink:0, position:'relative' }}>
+          <button className="drill-close" onClick={onClose}>✕ close</button>
+          <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.22em', fontFamily:DRP_SERIF,
+            color:'rgba(255,255,255,0.48)', marginBottom:4, textTransform:'lowercase' }}>{eyebrow}</div>
+          <div style={{ display:'flex', alignItems:'baseline', gap:14 }}>
+            <div style={{ fontFamily:DRP_SERIF, fontWeight:600, fontSize:26, color:'#fff' }}>
+              {isRisk?'Risk Analysis':'Opportunity Analysis'}
+            </div>
+            <div style={{ fontFamily:DRP_SERIF, fontWeight:600, fontSize:28, color:accent, fontVariantNumeric:'tabular-nums' }}>
+              {sign}{fmt.m(raw.total)}
+            </div>
+            <div style={{ fontSize:11, color:diff<1?'#72D4A0':'#E87878' }}>
+              {diff<1?'✓ reconciled':'! diff '+fmt.k(diff)}
+            </div>
+          </div>
+        </div>
 
-    // subtotalRowIdx: SheetJS row index of the SUBTOTAL row.
-    // Used in Step 3 to avoid double-counting the SUBTOTAL row's formula value.
-    let subtotalRowIdx = -1;
+        {/* Body — left: sunburst | right: drilldown tables */}
+        <div style={{ flex:1, overflow:'hidden', display:'flex', minHeight:0 }}>
 
-    // ── STEP 1: Pre-scan — locate SUBTOTAL row and read its formula ──────
-    for (let ps = headerRowIdx + 1; ps < rows.length; ps++) {
-      const psRow = rows[ps];
-      if (!psRow || psRow.every(v => v === null || v === '' || v === undefined)) continue;
+          {/* LEFT: Sunburst */}
+          <div style={{ width:880, flexShrink:0, borderRight:'1px solid rgba(255,255,255,0.08)',
+            overflow:'auto', padding:'16px 4px' }}>
+            <SunburstView
+              items={items} totalAmount={raw.total}
+              centerSign={sign} centerColor={accent} centerLabel={kpiLbl}
+              isDark={true} size={500} singleRing={true}
+              zoomed={selCat} onZoom={pickCat} onVendorClick={pickVendor}
+              hideLegend={true}
+            />
+          </div>
 
-      const psTx  = str(psRow[colIdx['Transaction Type']]);
-      const psCat = str(psRow[colIdx['Category']]);
-      const psSub = str(psRow[colIdx['Sub-Category1']]);
+          {/* RIGHT: Analytical drilldown */}
+          <div style={{ flex:1, overflow:'auto', padding:'16px 20px' }}>
 
-      // SUBTOTAL row has no Transaction Type, no Category, and no Sub-Category
-      if (!psTx && !psCat && !psSub) {
+            {/* Breadcrumb */}
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, fontSize:12 }}>
+              <button onClick={()=>pickCat(null)} style={{ background:'none', border:'none',
+                color:selCat?accent:'#fff', cursor:selCat?'pointer':'default',
+                fontFamily:DRP_SANS, fontSize:12, fontWeight:selCat?600:400, padding:0 }}>
+                {kpiLbl}
+              </button>
+              {selCat && <><span style={{ color:'rgba(255,255,255,0.3)' }}>›</span>
+                <button onClick={()=>pickVendor(null)} style={{ background:'none', border:'none',
+                  color:selVendor?accent:'#fff', cursor:selVendor?'pointer':'default',
+                  fontFamily:DRP_SANS, fontSize:12, fontWeight:selVendor?600:400, padding:0 }}>
+                  {selCat}
+                </button></>}
+              {selVendor && <><span style={{ color:'rgba(255,255,255,0.3)' }}>›</span>
+                <span style={{ fontSize:12, color:'#fff' }}>{selVendor}</span></>}
+            </div>
 
-        subtotalRowIdx = ps; // Save for main loop exclusion guard
+            {/* LEVEL 1: Categories */}
+            {!selCat && (<div>
+              <ReconcBadge parentLabel={kpiLbl} parentAmt={raw.total}
+                childLabel="Sum of categories" childAmt={catSum} light />
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.2em', fontFamily:DRP_SERIF,
+                  color:'rgba(255,255,255,0.35)', textTransform:'lowercase' }}>
+                  by category — click to see vendors
+                </div>
+                <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.07em', textTransform:'uppercase',
+                  background:isRisk?'rgba(178,58,58,0.2)':'rgba(47,122,77,0.2)',
+                  color:isRisk?'#E87878':'#72D4A0',
+                  border:`1px solid ${isRisk?'rgba(178,58,58,0.38)':'rgba(47,122,77,0.38)'}`,
+                  borderRadius:3, padding:'2px 7px' }}>
+                  {isRisk ? '▲ Risk' : '↓ Opp'}
+                </span>
+              </div>
+              {raw.categories.map(c=>(
+                <HBar key={c.cat} label={c.cat} amount={c.amount} maxAmt={maxCat}
+                  color={drillCatColor(c.cat)} onClick={()=>pickCat(c.cat)} selected={selCat===c.cat}
+                  leftAccent={isRisk ? 'rgba(178,58,58,0.6)' : 'rgba(47,122,77,0.6)'} />
+              ))}
+            </div>)}
 
-        // ── Capture authoritative KPI totals from the SUBTOTAL row ──────
-        workbookSubtotal = {
-          budget:   num(psRow[colIdx['2026 Final Budget']]),
-          forecast: num(psRow[colIdx['2026 (Actuals + Forecast)']]),
-          actual:   num(psRow[colIdx['Total Actuals']]),
-          risk:     num(psRow[colIdx['2026 Risk']]),
-          opp:      num(psRow[colIdx['2026 Opportunity']]),
-          net:      num(psRow[colIdx['2026 Net Position']]),
-        };
-        workbookSubtotal.absOpp    = Math.abs(workbookSubtotal.opp);
-        workbookSubtotal.remaining = workbookSubtotal.forecast - workbookSubtotal.actual;
+            {/* LEVEL 2: Vendors */}
+            {selCat && !selVendor && catData && (<div>
+              <ReconcBadge parentLabel={selCat} parentAmt={catData.amount}
+                childLabel="Sum of vendors" childAmt={vendorSum} light />
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.2em', fontFamily:DRP_SERIF,
+                  color:'rgba(255,255,255,0.35)', textTransform:'lowercase' }}>
+                  {selCat} · vendor breakdown — click to see contracts
+                </div>
+                <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.07em', textTransform:'uppercase',
+                  background:isRisk?'rgba(178,58,58,0.2)':'rgba(47,122,77,0.2)',
+                  color:isRisk?'#E87878':'#72D4A0',
+                  border:`1px solid ${isRisk?'rgba(178,58,58,0.38)':'rgba(47,122,77,0.38)'}`,
+                  borderRadius:3, padding:'2px 7px' }}>
+                  {isRisk ? '▲ Risk' : '↓ Opp'}
+                </span>
+              </div>
+              {catData.vendors.map((v,vi)=>(
+                <HBar key={v.name} label={v.name} amount={v.amount} maxAmt={maxVend}
+                  color={drillCatColor(selCat, 1, vi)}
+                  leftAccent={isRisk ? 'rgba(178,58,58,0.4)' : 'rgba(47,122,77,0.4)'}
+                  onClick={v.contracts.length>0?()=>pickVendor(v.name):null} />
+              ))}
+            </div>)}
 
-        // ── Extract formula range end from the SUBTOTAL cell ────────────
-        // The Budget column cell should contain e.g. =SUBTOTAL(9,V2:V140).
-        // We parse the upper-bound row number from that formula string.
-        const budCellAddr = XLSX.utils.encode_cell({ r: ps, c: colIdx['2026 Final Budget'] });
-        const budCell     = ws[budCellAddr];
-        if (budCell && budCell.f) {
-          // Detect SUBTOTAL(9,...) — function_num 9 excludes rows hidden by filter.
-          // If the workbook was saved with an AutoFilter active the cached value
-          // reflects only the VISIBLE rows, NOT the grand total.  We detect this
-          // by checking for the SUBTOTAL keyword; when found we skip the cached
-          // value as the authoritative KPI source and rely on the lineItems sum.
-          const isFilteredSubtotal = /^\s*SUBTOTAL\s*\(\s*(9|109)\s*,/i.test(budCell.f);
-          if (isFilteredSubtotal) {
-            console.warn('[parse] SUBTOTAL(9/109,...) detected at R' + (ps+1) +
-              ' — workbook likely saved with AutoFilter active.' +
-              ' Cached value ($' + Math.round(workbookSubtotal.budget/1000) + 'K) reflects filtered rows only.' +
-              ' Falling back to lineItems aggregation for all KPI cards.' +
-              ' To fix: open workbook → Data → Refresh All → save → re-upload.');
-            workbookSubtotal = null; // will be replaced by lineItems sum below
-          } else {
-            // Match the end of a range reference like ":V140)" or ":AB140,"
-            const rangeMatch = budCell.f.match(/:[A-Z]+(\d+)\s*[),]/);
-            if (rangeMatch) {
-              subtotalRangeEnd = parseInt(rangeMatch[1], 10);
-            }
+            {/* LEVEL 3: Contracts + notes */}
+            {selVendor && vendorData && (<div>
+              <ReconcBadge parentLabel={selVendor.split(' ').slice(0,2).join(' ')}
+                parentAmt={vendorData.amount} childLabel="Sum of contracts" childAmt={contrSum} light />
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.2em', fontFamily:DRP_SERIF,
+                  color:'rgba(255,255,255,0.35)', textTransform:'lowercase' }}>
+                  {selVendor} · contract detail
+                </div>
+                <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.07em', textTransform:'uppercase',
+                  background:isRisk?'rgba(178,58,58,0.2)':'rgba(47,122,77,0.2)',
+                  color:isRisk?'#E87878':'#72D4A0',
+                  border:`1px solid ${isRisk?'rgba(178,58,58,0.38)':'rgba(47,122,77,0.38)'}`,
+                  borderRadius:3, padding:'2px 7px' }}>
+                  {isRisk ? '▲ Risk' : '↓ Opp'}
+                </span>
+              </div>
+              {vendorData.contracts.map((c,i)=>(
+                <div key={i} style={{ padding:'10px 0 10px 10px', borderBottom:'1px solid rgba(255,255,255,0.07)',
+                  borderLeft:`3px solid ${isRisk?'rgba(178,58,58,0.35)':'rgba(47,122,77,0.35)'}` }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
+                    <div style={{ fontSize:13, color:'rgba(255,255,255,0.85)', flex:1, paddingRight:12 }}>{c.name}</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:drillCatColor(selCat, 2, i),
+                      fontVariantNumeric:'tabular-nums', fontFamily:DRP_SANS, flexShrink:0 }}>
+                      {sign}{fmt.k(c.amount)}
+                    </div>
+                  </div>
+                  <div style={{ height:6, background:'rgba(255,255,255,0.07)', borderRadius:2, marginBottom:6 }}>
+                    <div style={{ height:'100%', width:`${(c.amount/maxContr)*100}%`,
+                      background:drillCatColor(selCat, 2, i), opacity:0.85, borderRadius:2 }} />
+                  </div>
+                  {c.notes && <div style={{ fontSize:11, color:'rgba(255,255,255,0.38)', lineHeight:1.5 }}>{c.notes}</div>}
+                </div>
+              ))}
+            </div>)}
+
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── NetDrillPanel: sunburst (left) + net position drilldown (right) ───
+function NetDrillPanel({ onClose, rawData }) {
+  const [selCat,    setSelCat]    = useStateDR(null);
+  const [selVendor, setSelVendor] = useStateDR(null);
+  const pickCat    = c => { setSelCat(c); setSelVendor(null); };
+  const pickVendor = v => setSelVendor(v);
+
+  // Always use dynamically built hierarchy from uploaded workbook lineItems.
+  if (!rawData) console.warn('[NetDrillPanel] WARNING: static fallback data used — uploaded workbook data was not provided.');
+  const netSrc = rawData || { total: 0, categories: [] };
+  const items = netSrc.categories.map(c=>({
+    cat:c.cat, variance:c.amount,
+    vendors:c.vendors.map(v=>({
+      name:v.name, variance:v.amount,
+      contracts:v.contracts.map(ct=>({ name:ct.name, variance:ct.amount, notes:ct.notes||'' })),
+    })),
+  }));
+
+  const catData    = selCat    ? netSrc.categories.find(c=>c.cat===selCat)       : null;
+  const vendorData = selVendor ? catData?.vendors.find(v=>v.name===selVendor)       : null;
+  const maxCat     = netSrc.categories.length ? Math.max(...netSrc.categories.map(c=>Math.abs(c.amount)),1) : 1;
+  const maxVend    = catData?.vendors.length ? Math.max(...catData.vendors.map(v=>Math.abs(v.amount)),1) : 1;
+  const maxContr   = vendorData?.contracts.length ? Math.max(...vendorData.contracts.map(c=>Math.abs(c.amount)),1) : 1;
+  const catSum     = netSrc.categories.reduce((s,c)=>s+c.amount,0);
+  const vendorSum  = catData ? catData.vendors.reduce((s,v)=>s+v.amount,0) : 0;
+  const contrSum   = vendorData ? vendorData.contracts.reduce((s,c)=>s+c.amount,0) : 0;
+  const diff       = Math.abs(netSrc.total - catSum);
+  const netFav     = netSrc.total < 0;
+  const netAccent  = netFav ? '#72D4A0' : '#E87878';
+
+  function netColor(amt) { return amt<0?'#72D4A0':'#E87878'; }
+  function netSign(amt)  { return amt<0?'−':'+'; }
+
+  return (
+    <div className="drill-overlay" onClick={onClose}>
+      <div className="drill-panel drill-panel-wide" onClick={e=>e.stopPropagation()}
+        style={{ display:'flex', flexDirection:'column', background:'#111827', overflow:'hidden' }}>
+
+        {/* Header */}
+        <div className="drill-head" style={{ flexShrink:0, padding:'18px 24px' }}>
+          <button className="drill-close" onClick={onClose}>✕ close</button>
+          <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.22em', fontFamily:DRP_SERIF,
+            color:'rgba(255,255,255,0.52)', marginBottom:4, textTransform:'lowercase' }}>
+            net opp/risk position · reconciled hierarchy
+          </div>
+          <div style={{ display:'flex', alignItems:'baseline', gap:14 }}>
+            <div style={{ fontFamily:DRP_SERIF, fontWeight:600, fontSize:26, color:'#fff' }}>
+              Net Position Analysis
+            </div>
+            <div style={{ fontFamily:DRP_SERIF, fontWeight:600, fontSize:28, color:netAccent, fontVariantNumeric:'tabular-nums' }}>
+              {netFav?'−':'+'}{fmt.m(Math.abs(netSrc.total))}
+            </div>
+            <div style={{ fontSize:11, color:diff<1?'#72D4A0':'#E87878' }}>
+              {diff<1?'✓ reconciled':'! diff '+fmt.k(diff)}
+            </div>
+          </div>
+        </div>
+
+        {/* Body — left: sunburst | right: drilldown */}
+        <div style={{ flex:1, overflow:'hidden', display:'flex', minHeight:0 }}>
+
+          {/* LEFT: Sunburst */}
+          <div style={{ width:880, flexShrink:0, borderRight:'1px solid rgba(255,255,255,0.08)',
+            overflow:'auto', padding:'16px 4px' }}>
+            <SunburstView
+              items={items} totalAmount={Math.abs(netSrc.total)}
+              centerSign={netFav?'−':'+'} centerColor={netAccent} centerLabel="Net Position"
+              isDark={true} size={500} singleRing={true}
+              zoomed={selCat} onZoom={pickCat} onVendorClick={pickVendor}
+              diverging={true}
+              hideLegend={true}
+            />
+          </div>
+
+          {/* RIGHT: Analytical drilldown */}
+          <div style={{ flex:1, overflow:'auto', padding:'16px 20px' }}>
+
+            {/* Breadcrumb */}
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, fontSize:12 }}>
+              <button onClick={()=>pickCat(null)} style={{ background:'none', border:'none',
+                color:selCat?netAccent:'#fff', cursor:selCat?'pointer':'default',
+                fontFamily:DRP_SANS, fontSize:12, fontWeight:selCat?600:400, padding:0 }}>
+                Net Position
+              </button>
+              {selCat && <><span style={{ color:'rgba(255,255,255,0.3)' }}>›</span>
+                <button onClick={()=>pickVendor(null)} style={{ background:'none', border:'none',
+                  color:selVendor?netAccent:'#fff', cursor:selVendor?'pointer':'default',
+                  fontFamily:DRP_SANS, fontSize:12, fontWeight:selVendor?600:400, padding:0 }}>
+                  {selCat}
+                </button></>}
+              {selVendor && <><span style={{ color:'rgba(255,255,255,0.3)' }}>›</span>
+                <span style={{ fontSize:12, color:'#fff' }}>{selVendor}</span></>}
+            </div>
+
+            <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:12, flexWrap:'wrap' }}>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', lineHeight:1.5 }}>+ unfavorable · − favorable</div>
+              <div style={{ display:'flex', gap:10 }}>
+                <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:10, color:'rgba(255,255,255,0.45)' }}>
+                  <span style={{ width:10, height:10, borderRadius:2, background:'rgba(232,120,120,0.85)', display:'inline-block', flexShrink:0 }}></span>
+                  unfavorable
+                </span>
+                <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:10, color:'rgba(255,255,255,0.45)' }}>
+                  <span style={{ width:10, height:10, borderRadius:2, background:'rgba(114,212,160,0.85)', display:'inline-block', flexShrink:0 }}></span>
+                  favorable
+                </span>
+              </div>
+            </div>
+
+            {/* LEVEL 1: Categories */}
+            {!selCat && (<div>
+              <ReconcBadge parentLabel="Net KPI" parentAmt={netSrc.total}
+                childLabel="Sum of categories" childAmt={catSum} light />
+              {netSrc.categories.map(c=>(
+                <HBar key={c.cat} label={c.cat} amount={c.amount} maxAmt={maxCat}
+                  color={netDivColor(c.amount, maxCat)} signed onClick={()=>pickCat(c.cat)}
+                  leftAccent={c.amount < 0 ? 'rgba(114,212,160,0.7)' : c.amount > 0 ? 'rgba(232,120,120,0.7)' : 'rgba(255,255,255,0.2)'} />
+              ))}
+            </div>)}
+
+            {/* LEVEL 2: Vendors */}
+            {selCat && !selVendor && catData && (<div>
+              <ReconcBadge parentLabel={selCat} parentAmt={catData.amount}
+                childLabel="Sum of vendors" childAmt={vendorSum} light />
+              {catData.vendors.map((v,vi)=>(
+                <HBar key={v.name} label={v.name} amount={v.amount} maxAmt={maxVend}
+                  color={netDivColor(v.amount, maxVend, 1)} signed
+                  leftAccent={v.amount < 0 ? 'rgba(114,212,160,0.55)' : v.amount > 0 ? 'rgba(232,120,120,0.55)' : 'rgba(255,255,255,0.2)'}
+                  onClick={v.contracts.length>0?()=>pickVendor(v.name):null} />
+              ))}
+            </div>)}
+
+            {/* LEVEL 3: Contracts */}
+            {selVendor && vendorData && (<div>
+              <ReconcBadge parentLabel={selVendor.split(' ').slice(0,2).join(' ')}
+                parentAmt={vendorData.amount} childLabel="Sum of contracts" childAmt={contrSum} light />
+              {vendorData.contracts.map((c,i)=>(
+                <div key={i} style={{ padding:'10px 0 10px 10px', borderBottom:'1px solid rgba(255,255,255,0.07)',
+                  borderLeft:`3px solid ${c.amount<0?'rgba(114,212,160,0.45)':c.amount>0?'rgba(232,120,120,0.45)':'rgba(255,255,255,0.18)'}` }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
+                    <div style={{ fontSize:13, color:'rgba(255,255,255,0.85)', flex:1, paddingRight:12 }}>{c.name}</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:netColor(c.amount),
+                      fontVariantNumeric:'tabular-nums', fontFamily:DRP_SANS, flexShrink:0 }}>
+                      {netSign(c.amount)}{fmt.k(Math.abs(c.amount))}
+                    </div>
+                  </div>
+                  <div style={{ height:6, background:'rgba(255,255,255,0.07)', borderRadius:2, marginBottom:c.notes?6:0 }}>
+                    <div style={{ height:'100%', width:`${(Math.abs(c.amount)/maxContr)*100}%`,
+                      background:netDivColor(c.amount, maxContr, 2), opacity:0.9, borderRadius:2 }} />
+                  </div>
+                  {c.notes && <div style={{ fontSize:11, color:'rgba(255,255,255,0.38)', lineHeight:1.5 }}>{c.notes}</div>}
+                </div>
+              ))}
+            </div>)}
+
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── VarianceExplorerPanel (budget→forecast variance) ─────────────────────
+// Accessed via "Explore Variance" button in category chart — separate from Net KPI drill
+const VAR_DATA = [
+  {
+    "cat": "Labor/ T&M",
+    "variance": 1761250,
+    "vendors": [
+      {
+        "name": "Intelligent Business Platforms LLC",
+        "variance": 916752,
+        "contracts": [
+          {
+            "name": "T&M — T&M",
+            "budget": 0,
+            "forecast": 940800,
+            "actual": 0,
+            "risk": 940800,
+            "opp": 0,
+            "notes": "T&M- H2-2026 Risk",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              157,
+              157,
+              157,
+              157,
+              157,
+              157
+            ]
+          },
+          {
+            "name": "T&M — T&M",
+            "budget": 940800,
+            "forecast": 916752,
+            "actual": 446352,
+            "risk": 0,
+            "opp": -24048,
+            "notes": "T&M - Intellibus",
+            "monthly": [
+              157,
+              157,
+              157,
+              157,
+              157,
+              157,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
           }
-        }
-
-        break; // Only the first SUBTOTAL row is used
-      }
-    }
-
-    // ── STEP 2: Fallback — derive range end via budget-sum matching ──────
-    // Used when the XLSX file stores only computed values, not formula strings.
-    // Skip if a filtered SUBTOTAL was already detected (workbookSubtotal = null).
-    if (!subtotalRangeEnd && workbookSubtotal) {
-      const targetBudget = workbookSubtotal.budget; // = SUM of all rows in SUBTOTAL range
-      let cumBudget = 0;
-      for (let ri = headerRowIdx + 1; ri < rows.length; ri++) {
-        const rrow = rows[ri];
-        if (!rrow || rrow.every(v => v === null || v === '')) continue;
-        const rtx  = str(rrow[colIdx['Transaction Type']]);
-        const rcat = str(rrow[colIdx['Category']]);
-        const rsub = str(rrow[colIdx['Sub-Category1']]);
-        if (!rtx && !rcat && !rsub) break; // Reached SUBTOTAL row — stop
-        cumBudget += num(rrow[colIdx['2026 Final Budget']]);
-        // When the running total matches the SUBTOTAL budget (within $1 for float rounding),
-        // the current row is the last row in the SUBTOTAL range.
-        if (Math.abs(cumBudget - targetBudget) < 1) {
-          subtotalRangeEnd = ri + 1; // Convert 0-based SheetJS index to 1-based Excel row
-          break;
-        }
-      }
-    }
-
-    // ── Formula-derived field detection (pre-STEP 3) ────────────────────────
-    // Sample up to 8 data rows to determine whether Risk, Opp, Net are formula-
-    // derived from Budget and Forecast.  When a cell carries a formula, the
-    // parser re-derives its value in JS instead of trusting the cached result.
-    // This avoids stale values when the workbook was saved with manual calc mode.
-    //
-    // Standard derivation (confirmed from workbook IF formulas):
-    //   net         = forecast − budget
-    //   risk        = net > 0 ? net : 0    (unfavorable overspend)
-    //   opportunity = net < 0 ? net : 0    (favorable underspend)
-    const _riskCI = colIdx['2026 Risk'];
-    const _oppCI  = colIdx['2026 Opportunity'];
-    const _netCI  = colIdx['2026 Net Position'];
-    let _riskFml = false, _oppFml = false, _netFml = false, _fmlSampled = 0;
-    for (let _sr = headerRowIdx + 1; _sr < rows.length && _fmlSampled < 8; _sr++) {
-      const _srow = rows[_sr];
-      if (!_srow || _srow.every(v => v === null || v === '' || v === undefined)) continue;
-      if (Math.abs(num(_srow[colIdx['2026 Final Budget']])) < 100) continue;
-      if (_riskCI != null && !_riskFml) { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _riskCI })]; if (_c && _c.f) _riskFml = true; }
-      if (_oppCI  != null && !_oppFml)  { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _oppCI  })]; if (_c && _c.f) _oppFml  = true; }
-      if (_netCI  != null && !_netFml)  { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _netCI  })]; if (_c && _c.f) _netFml  = true; }
-      _fmlSampled++;
-    }
-    console.log('[parse] Risk/Opp/Net formula detection (' + _fmlSampled + ' rows sampled):',
-      { riskFormula: _riskFml, oppFormula: _oppFml, netFormula: _netFml });
-
-    // ── STEP 3: Main data loop — process only rows within the SUBTOTAL range ─
-    const lineItems = [];
-    let rowCount = 0;
-    let excludedCount = 0;
-    // Track totals for ALL rows excluded within the SUBTOTAL range (any exclusion
-    // reason: Capitalization type, no vendor/project, summary rows).
-    // This covers every path that removes a row from lineItems but leaves it in the
-    // SUBTOTAL formula — regardless of which field or rule triggered the exclusion.
-    // NOTE: the SUBTOTAL row itself (subtotalRowIdx) is always skipped.
-    let exclBudget = 0, exclForecast = 0, exclActual = 0, exclRisk = 0, exclOpp = 0, exclNet = 0;
-    // ── Error / recompute tracking ───────────────────────────────────────
-    let _errCellCount = 0;          // cells that contained an Excel error value
-    let _netRecompCount = 0;        // rows where Net was recomputed from FC−Bud
-    const _netRecompSample = [];    // up to 5 sample rows for console logging
-    const capRowLog = []; // diagnostic: rows excluded as Capitalization
-    for (let r = headerRowIdx + 1; r < rows.length; r++) {
-
-      // Convert SheetJS 0-based row index to 1-based Excel row number
-      const excelRowNum = r + 1;
-
-      // ── ROW INCLUSION GATE ──────────────────────────────────────────────
-      // If a SUBTOTAL range was found, skip any row beyond its upper bound.
-      // This ensures the dataset matches the SUBTOTAL formula range exactly.
-      // Example: if subtotalRangeEnd = 140, rows 141+ are excluded.
-      if (subtotalRangeEnd && excelRowNum > subtotalRangeEnd) {
-        excludedCount++;
-        continue;
-      }
-      const row = rows[r];
-      if (!row || row.every(v => v === null || v === '' || v === undefined)) continue;
-
-      // Build base record
-      const rec = {};
-      for (const [hdr, fld] of Object.entries(HEADERS)) {
-        const ci = colIdx[hdr];
-        rec[fld] = ci != null ? row[ci] : null;
-      }
-
-      const tx = str(rec.transactionType);
-      // Pre-read financial values — used for exclusion tracking and lineItem building.
-      // Inlined at each exclusion path (no helper function — avoids Babel hoisting issues
-      // with function declarations inside for-loop blocks).
-      const _rB = num(rec.budget), _rF = num(rec.forecast), _rA = num(rec.actual),
-            _rR = num(rec.risk),   _rO = num(rec.opp),      _rN = num(rec.net);
-      // ── Exclusion path A: Capitalization transaction type ─────────────
-      if (tx.toLowerCase() === 'capitalization') {
-        if (r !== subtotalRowIdx) {
-          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
-          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
-        }
-        capRowLog.push({ excelRow: excelRowNum, budget:_rB, forecast:_rF, actual:_rA, risk:_rR, opp:_rO, net:_rN, reason:'cap-tx' });
-        excludedCount++;
-        continue;
-      }
-      // ── Exclusion path B: no vendor AND no project ────────────────────
-      if (!str(rec.vendor) && !str(rec.project)) {
-        if (r !== subtotalRowIdx) {
-          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
-          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
-        }
-        capRowLog.push({ excelRow: excelRowNum, budget:_rB, forecast:_rF, actual:_rA, risk:_rR, opp:_rO, net:_rN, reason:'no-vendor-project', tx });
-        continue;
-      }
-      // ── Exclusion path C: summary/subtotal rows (no tx, no cat, no subcat) ──
-      const recCat    = str(rec.category);
-      const recSubCat = str(rec.subCategory);
-      if (!tx && !recCat && !recSubCat) {
-        if (r !== subtotalRowIdx) {
-          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
-          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
-        }
-        excludedCount++;
-        continue;
-      }
-
-      // ── Error-safe risk/opp/net ───────────────────────────────────────────
-      // Recompute when a cell: (a) is an Excel error, OR
-      //                        (b) is formula-driven (per column-level detection)
-      //                            AND carries a formula on this specific cell.
-      // Hardcoded plain-number overrides are always preserved.
-      const _liBud = num(rec.budget);
-      const _liFc  = num(rec.forecast);
-      const _liN   = _liFc - _liBud;
-
-      const _rCell = _riskCI != null ? ws[XLSX.utils.encode_cell({ r, c: _riskCI })] : null;
-      const _oCell = _oppCI  != null ? ws[XLSX.utils.encode_cell({ r, c: _oppCI  })] : null;
-      const _nCell = _netCI  != null ? ws[XLSX.utils.encode_cell({ r, c: _netCI  })] : null;
-
-      if (_isErrCell(_rCell)) _errCellCount++;
-      if (_isErrCell(_oCell)) _errCellCount++;
-      if (_isErrCell(_nCell)) _errCellCount++;
-
-      const _recompRisk = _isErrCell(_rCell) || (_riskFml && _rCell && _rCell.f);
-      const _recompOpp  = _isErrCell(_oCell) || (_oppFml  && _oCell && _oCell.f);
-      const _recompNet  = _isErrCell(_nCell) || (_netFml  && _nCell && _nCell.f);
-
-      let _liRisk = _recompRisk ? (_liN > 0 ? _liN : 0) : num(rec.risk);
-      let _liOpp  = _recompOpp  ? (_liN < 0 ? _liN : 0) : num(rec.opp);
-      let _liNet  = _recompNet  ? _liN                  : num(rec.net);
-
-      if (_recompNet) {
-        _netRecompCount++;
-        if (_netRecompSample.length < 5) {
-          _netRecompSample.push({
-            row: r + 1,
-            vendor: str(rec.vendor) || '(unknown)',
-            budget: _liBud, forecast: _liFc,
-            storedNet: _nCell ? _nCell.v : null,
-            netErr: _isErrCell(_nCell),
-            computedNet: _liN,
-          });
-        }
-      }
-
-      const lineItem = {
-        vendor: str(rec.vendor) || '',
-        domain: str(rec.domain) || '',
-        owner: str(rec.owner) || 'N/A',
-        category: str(rec.category) || '',
-        project: str(rec.project) || '',
-        application: str(rec.application) || '',
-        subCategory: str(rec.subCategory) || '',
-        treatment: str(rec.treatment) || '',
-        budget: _liBud,
-        actual: num(rec.actual),
-        forecast: _liFc,
-        risk: _liRisk,
-        opp: _liOpp,
-        net: _liNet,
-        notes: str(rec.notes) || '',
-        notesRO: '',
-        monthlyAC: readArr(row, colIdx, MONTHS_AC),
-        monthlyFC: readArr(row, colIdx, MONTHS_FC),
-        monthlyOR: readArr(row, colIdx, resolvedOR),
-        onestreamCategory: str(rec.onestreamCategory) || '',
-        // Use robust-detected column index directly (bypasses exact HEADERS spelling)
-        nonCommitted: _ncColIdx != null ? str(row[_ncColIdx]) : '',
-      };
-      lineItems.push(lineItem);
-      rowCount++;
-    }
-
-    // ── Notes - R&O sheet: build lookup and attach to line items ──────────
-    const roSheetName = wb.SheetNames.find(n => /notes.*r.?o/i.test(n) || /r.?o.*notes/i.test(n));
-    // vendorCatNotes: vendor → [{category, note}] ordered as in the Notes sheet
-    const vendorCatNotes = new Map();
-
-    if (roSheetName) {
-      try {
-        const roWs   = wb.Sheets[roSheetName];
-        const roRows = XLSX.utils.sheet_to_json(roWs, { header: 1, defval: null, raw: false });
-
-        // Detect header row to find optional category column
-        const hdr = (roRows[0] || []).map(h => str(h).toLowerCase());
-        const catColIdx = hdr.findIndex(h => h.includes('category') || h === 'cat');
-        console.log('[parse] Notes - R&O header cols:', hdr.slice(0, 12), '→ category col idx:', catColIdx);
-
-        const roMapVC = new Map(); // vendor|category → note  (preferred)
-        const roMapV  = new Map(); // vendor → note           (fallback)
-
-        for (let ri = 1; ri < roRows.length; ri++) {
-          const r      = roRows[ri] || [];
-          const owner  = str(r[1]);
-          const vendor = str(r[2]);
-          const cat    = catColIdx >= 0 ? str(r[catColIdx]) : '';
-          const notes  = str(r[8]);
-          if (!vendor || !notes) continue;
-          if (/total$/i.test(owner) || /^values$/i.test(owner)) continue;
-          if (/^(dark|light)\s+(green|red)/i.test(notes)) continue;
-          const k1 = vendor.toLowerCase();
-          if (!roMapV.has(k1)) roMapV.set(k1, notes);
-          if (cat) {
-            roMapVC.set(`${k1}|${cat.toLowerCase()}`, notes);
-            // Build per-vendor category list (preserves Notes sheet order)
-            if (!vendorCatNotes.has(k1)) vendorCatNotes.set(k1, []);
-            const vcList = vendorCatNotes.get(k1);
-            if (!vcList.find(x => x.category.toLowerCase() === cat.toLowerCase())) {
-              vcList.push({ category: cat, note: notes });
-            }
-          }
-        }
-        for (const li of lineItems) {
-          const k1  = li.vendor.toLowerCase();
-          const vcList = vendorCatNotes.get(k1);
-          // Try to find the Notes spend category that best matches this line item
-          let matchedCat = null;
-          if (vcList && vcList.length) {
-            const sub   = (li.subCategory   || '').toLowerCase().replace(/[^\w]/g, '');
-            const cont  = (li.contractType  || '').toLowerCase().replace(/[^\w]/g, '');
-            const isLabor = (li.category || '').toLowerCase() === 'labor';
-            for (const { category: nc } of vcList) {
-              const ncN = nc.toLowerCase().replace(/[^\w]/g, '');
-              if (sub  && (ncN === sub  || ncN.includes(sub)  || sub.includes(ncN)))  { matchedCat = nc; break; }
-              if (cont && (ncN === cont || ncN.includes(cont) || cont.includes(ncN))) { matchedCat = nc; break; }
-              if (isLabor && (ncN.includes('labor') || ncN.includes('tm') || ncN.includes('t&m'))) { matchedCat = nc; break; }
-            }
-          }
-          li.spendCategory = matchedCat || li.subCategory || li.category;
-          li.notesRO = (matchedCat && roMapVC.get(`${k1}|${matchedCat.toLowerCase()}`)) || roMapV.get(k1) || '';
-        }
-        console.log('[parse] Notes - R&O:', roMapVC.size, 'category-level +', roMapV.size, 'vendor-level entries');
-      } catch(e) {
-        console.warn('[parse] Notes - R&O parse failed:', e.message);
-      }
-    }
-
-    // ── Error / recompute summary ─────────────────────────────────────────
-    console.log('[parse] Excel error cells found in Risk/Opp/Net columns: ' + _errCellCount);
-    console.log('[parse] Rows where Net was recomputed from Forecast−Budget: ' + _netRecompCount);
-    if (_netRecompSample.length) {
-      console.log('[parse] Net recompute sample rows:', _netRecompSample.map(s =>
-        'R' + s.row + ' ' + s.vendor.slice(0,24) +
-        ' | bud=$' + Math.round(s.budget/1000) + 'K fc=$' + Math.round(s.forecast/1000) + 'K' +
-        ' | stored=' + (s.netErr ? '#ERR' : '$'+Math.round((s.storedNet||0)/1000)+'K') +
-        ' → computed=$' + Math.round(s.computedNet/1000) + 'K'
-      ));
-    }
-
-    // ── When filtered SUBTOTAL was detected (workbookSubtotal=null), build from lineItems ──
-    // Mark as lineItems-sourced so the cap-exclusion block below can skip it
-    // (lineItems already exclude Capitalization rows — no double-subtraction).
-    let _wbsFromLineItems = false;
-    if (!workbookSubtotal && lineItems.length) {
-      let _lb=0,_lf=0,_la=0,_lr=0,_lo=0,_ln=0;
-      for (const li of lineItems) { _lb+=li.budget||0; _lf+=li.forecast||0; _la+=li.actual||0; _lr+=li.risk||0; _lo+=li.opp||0; _ln+=li.net||0; }
-      workbookSubtotal = { budget:_lb, forecast:_lf, actual:_la, remaining:_lf-_la, risk:_lr, opp:_lo, net:_ln, absOpp:Math.abs(_lo) };
-      _wbsFromLineItems = true;
-      console.log('[parse] KPI from lineItems (filtered-SUBTOTAL path): budget=$'+Math.round(_lb/1e3)+'K forecast=$'+Math.round(_lf/1e3)+'K risk=$'+Math.round(_lr/1e3)+'K');
-    }
-
-    // ── Adjust workbookSubtotal to exclude Capitalization rows ─────────────
-    // Cap exclusion accounting complete — adjustment applied conditionally below
-    // Adjust workbookSubtotal only when it differs from lineItems sums.
-    //
-    // Two cases handled:
-    //  a) Workbook saved WITH filter ON:  SUBTOTAL cached value already excludes Cap →
-    //     raw SUBTOTAL == lineItems sum → no adjustment needed, reconciliation passes.
-    //  b) Workbook saved WITHOUT filter:  SUBTOTAL includes Cap row amounts →
-    //     raw SUBTOTAL != lineItems sum → subtract excluded amounts to align them.
-    //
-    // Without this guard, subtracting a negative Cap budget (credit entry) would
-    // ADD to the SUBTOTAL instead of reducing it, breaking reconciliation.
-    if (workbookSubtotal) {
-      let _lb = 0, _lf = 0, _la = 0;
-      for (const li of lineItems) { _lb += li.budget||0; _lf += li.forecast||0; _la += li.actual||0; }
-      const _rawBudget = workbookSubtotal.budget;
-      const needsAdj = Math.abs(workbookSubtotal.budget   - _lb) > 1 ||
-                       Math.abs(workbookSubtotal.forecast - _lf) > 1 ||
-                       Math.abs(workbookSubtotal.actual   - _la) > 1;
-      if (needsAdj) {
-        const adjForecast = workbookSubtotal.forecast - exclForecast;
-        const adjActual   = workbookSubtotal.actual   - exclActual;
-        workbookSubtotal = {
-          budget:    workbookSubtotal.budget   - exclBudget,
-          forecast:  adjForecast,
-          actual:    adjActual,
-          remaining: adjForecast - adjActual,
-          risk:      workbookSubtotal.risk     - exclRisk,
-          opp:       workbookSubtotal.opp      - exclOpp,
-          net:       workbookSubtotal.net      - exclNet,
-          absOpp:    Math.abs(workbookSubtotal.opp - exclOpp),
-        };
-
-      } else {
-        console.log('[parse] Cap exclusion:', capRowLog.length, 'row(s) excluded, exclBudget=', Math.round(exclBudget/1000) + 'K, adjustment needed=', needsAdj);
-      }
-
-      // ── POST-ADJUSTMENT VALIDATION ───────────────────────────────────
-      // If the adjusted workbookSubtotal still diverges from lineItems by
-      // more than $1 000 (e.g. cap rows have negative budgets that over-
-      // correct when subtracted, or the SUBTOTAL range was mis-detected),
-      // fall back to the lineItems aggregation as the authoritative KPI
-      // source so that KPI cards always match the detail/category views.
-      let _lr = 0, _lo = 0, _ln = 0;
-      for (const li of lineItems) { _lr += li.risk||0; _lo += li.opp||0; _ln += li.net||0; }
-      const _postBudDiff  = Math.abs(workbookSubtotal.budget   - _lb);
-      const _postFcDiff   = Math.abs(workbookSubtotal.forecast - _lf);
-      if (_postBudDiff > 1000 || _postFcDiff > 1000) {
-        console.warn('[parse] Subtotal still diverges after Cap adj (budgetΔ=' +
-          Math.round(_postBudDiff/1000) + 'K, forecastΔ=' +
-          Math.round(_postFcDiff/1000) + 'K); falling back to lineItems aggregation for KPI cards');
-        workbookSubtotal = {
-          budget:    _lb,
-          forecast:  _lf,
-          actual:    _la,
-          remaining: _lf - _la,
-          risk:      _lr,
-          opp:       _lo,
-          net:       _ln,
-          absOpp:    Math.abs(_lo),
-        };
-      }
-    }
-
-    if (!lineItems.length) {
-      throw new Error('No data rows parsed. Check that the Master Data sheet has rows below the header.');
-    }
-
-    const _result = buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd, vendorCatNotes);
-    const _s = _result.summary;
-    const _ws = _result.workbookSubtotal;
-    if (_ws) {
-      console.log('Adjusted subtotal === line items?', {
-        budget:   Math.abs(_ws.budget   - _s.budget)   < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.budget   - _s.budget).toFixed(2),
-        forecast: Math.abs(_ws.forecast - _s.forecast) < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.forecast - _s.forecast).toFixed(2),
-        risk:     Math.abs(_ws.risk     - _s.risk)     < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.risk     - _s.risk).toFixed(2),
-        opp:      Math.abs(_ws.absOpp   - Math.abs(_s.opp)) < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.absOpp - Math.abs(_s.opp)).toFixed(2),
-        net:      Math.abs(_ws.net      - _s.net)      < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.net      - _s.net).toFixed(2),
-      });
-    }
-    // ── Attach YTD Financials Run Rate data (authoritative KPI / chart source) ──
-    //
-    // SOURCE-OF-TRUTH SPLIT:
-    //   • YTD Financials Run Rate sheet → top KPI cards + Risk×Opp by Category chart.
-    //     This matches the control view users reconcile against in the workbook.
-    //   • Master Data lineItems → Back Pocket, vendor detail, project detail,
-    //     drilldowns, filter views.  All row-level data comes from here.
-    const _ytd = (() => {
-      try { return parseYTDSheet(wb); }
-      catch(e) { console.warn('[parse] YTD sheet parse failed:', e.message); return null; }
-    })();
-    if (_ytd) {
-      _result.ytdSummary    = _ytd.ytdSummary;
-      _result.ytdCategories = _ytd.ytdCategories;
-
-      // ── Console reconciliation check (non-visible) ───────────────────────
-      // Compares YTD Financials Run Rate Grand Total against Master Data
-      // lineItems aggregation.  Any diff > $1 K is flagged so analysts can
-      // detect stale pivots or parser row-scope mismatches immediately.
-      const _ys  = _ytd.ytdSummary;
-      const _md  = _result.summary;          // lineItems sum
-      const _diffs = {
-        budget:    Math.round(_md.budget   - _ys.budget),
-        forecast:  Math.round(_md.forecast - _ys.forecast),
-        risk:      Math.round(_md.risk     - _ys.risk),
-        opp:       Math.round(_md.opp      - _ys.opp),    // both signed
-        net:       Math.round(_md.net      - _ys.net),
-      };
-      const _anyDiff = Object.values(_diffs).some(d => Math.abs(d) > 1000);
-      if (_anyDiff) {
-        const _budMatch = Math.abs(_diffs.budget) <= 1000;
-        const _cause = _budMatch
-          ? 'Budget totals match but financial fields differ — rows were updated in Master Data after the YTD pivot was last refreshed (stale pivot cache).  Fix: open workbook, Data → Refresh All, save, re-upload.'
-          : 'Budget totals also differ — parser row scope may differ from the YTD pivot (different rows included/excluded).  Check subtotal range or filter state.';
-        console.warn('[reconcile] ⚠️  YTD Financials Run Rate and Master Data aggregation do not reconcile.\n' + _cause);
-        console.warn('[reconcile] Differences (Master Data − YTD), positive = MD higher:',
-          Object.fromEntries(
-            Object.entries(_diffs).map(([k, v]) => [k, '$' + (v/1000).toFixed(1) + 'K'])
-          )
-        );
-      } else {
-        console.log('[reconcile] ✅ YTD Financials Run Rate and Master Data reconcile within $1K.');
-      }
-    }
-    return _result;
-  }
-
-  // ── Parse YTD Financials Run Rate sheet ────────────────────────────────────
-  // Returns { ytdSummary, ytdCategories } or null on failure.
-  // ytdSummary  → headline KPI cards when no filter is active
-  // ytdCategories → Risk × Opp by Category chart, so bars match the KPIs
-  function parseYTDSheet(wb_) {
-    const ytdSheet = wb_.SheetNames.find(n => /ytd|run.?rate/i.test(n));
-    if (!ytdSheet) {
-      console.warn('[parse] YTD Financials Run Rate sheet not found — KPIs from Master Data');
-      return null;
-    }
-    const ws2  = wb_.Sheets[ytdSheet];
-    const rows = XLSX.utils.sheet_to_json(ws2, { header:1, defval:null, raw:true });
-
-    // Find column header row — row that has BOTH "Budget" and "Risk" in cells
-    let hdrIdx=-1, cBud=-1, cFc=-1, cRisk=-1, cOpp=-1, cNet=-1;
-    for (let r = 0; r < Math.min(rows.length, 8); r++) {
-      const row = rows[r] || [];
-      const hasBud  = row.some(v => /budget/i.test(str(v)));
-      const hasRisk = row.some(v => /risk/i.test(str(v)) && !/net/i.test(str(v)));
-      if (!hasBud || !hasRisk) continue;
-      hdrIdx = r;
-      row.forEach((v, i) => {
-        const s = str(v).toLowerCase();
-        if (s.includes('budget'))                                              cBud  = i;
-        if ((s.includes('actuals') || s.includes('forecast')) &&
-            !s.includes('budget'))                                             cFc   = i;
-        if (s.includes('risk') && !s.includes('net'))                         cRisk = i;
-        if (s.includes('opportun'))                                            cOpp  = i;
-        if (s.includes('net') && (s.includes('pos') || s.includes('ition')))  cNet  = i;
-      });
-      break;
-    }
-    if (hdrIdx < 0 || cBud < 0) {
-      console.warn('[parse] YTD sheet: column header not found');
-      return null;
-    }
-    if (cFc < 0) cFc = cBud + 1; // fallback: forecast column follows budget
-    console.log('[parse] YTD "' + ytdSheet + '" hdr=' + hdrIdx +
-      ' bud=' + cBud + ' fc=' + cFc + ' risk=' + cRisk + ' opp=' + cOpp + ' net=' + cNet);
-
-    const SKIP_RE = /transaction.?type|sub.?categ|row.?label|\(multiple|\(blank\)|domain.?owner|sum.?of/i;
-    const categories = [];
-    let   grandTotal = null;
-
-    for (let r = hdrIdx + 1; r < Math.min(rows.length, hdrIdx + 30); r++) {
-      const row = rows[r] || [];
-      if (row.every(v => v === null || v === '')) continue;
-
-      // Label = first non-numeric string in columns 0 → cBud-1
-      let label = '';
-      for (let c = 0; c < Math.max(1, cBud); c++) {
-        const v = str(row[c]);
-        if (v && !/^\d/.test(v)) { label = v; break; }
-      }
-      if (!label || SKIP_RE.test(label)) continue;
-
-      const budget   = num(row[cBud]);
-      const forecast = cFc   >= 0 ? num(row[cFc])   : 0;
-      const risk     = cRisk >= 0 ? num(row[cRisk])  : 0;
-      const opp      = cOpp  >= 0 ? num(row[cOpp])   : 0;
-      const net      = cNet  >= 0 ? num(row[cNet])   : (risk + opp);
-
-      if (/grand\s*total/i.test(label)) {
-        grandTotal = { budget, forecast, risk, opp, net };
-        break;
-      }
-      if (budget !== 0 || forecast !== 0) {
-        categories.push({ category: label, budget, forecast, risk, opp, net });
-      }
-    }
-
-    if (!grandTotal) {
-      console.warn('[parse] YTD sheet: Grand Total row not found — KPIs from Master Data');
-      return null;
-    }
-    console.log('[parse] YTD Grand Total: budget=$' + Math.round(grandTotal.budget/1000) + 'K' +
-      ' fc=$' + Math.round(grandTotal.forecast/1000) + 'K' +
-      ' risk=$' + Math.round(grandTotal.risk/1000) + 'K' +
-      ' opp=$' + Math.round(grandTotal.opp/1000) + 'K' +
-      ' net=$' + Math.round(grandTotal.net/1000) + 'K');
-    console.log('[parse] YTD categories:', categories.map(c => c.category).join(', '));
-
-    return {
-      ytdSummary: {
-        budget:   grandTotal.budget,
-        forecast: grandTotal.forecast,
-        risk:     grandTotal.risk,
-        opp:      grandTotal.opp,     // negative = favorable in workbook
-        absOpp:   Math.abs(grandTotal.opp),
-        net:      grandTotal.net,
+        ]
       },
-      ytdCategories: categories,
-    };
-  }
-
-  function uniq(arr) { return [...new Set(arr.filter(x => x !== '' && x != null))].sort(); }
-
-  function buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd, vendorCatNotes = new Map()) {
-    // Summary
-    const summary = lineItems.reduce((s, x) => ({
-      budget: s.budget + x.budget,
-      actual: s.actual + x.actual,
-      forecast: s.forecast + x.forecast,
-      risk: s.risk + x.risk,
-      opp: s.opp + x.opp,
-      net: s.net + x.net,
-    }), {budget:0, actual:0, forecast:0, risk:0, opp:0, net:0});
-    summary.remaining = summary.forecast - summary.actual;
-    summary.rowCount = rowCount;
-    summary.excludedCount = excludedCount;
-    // Back Pocket: sum of 2026 Net Position where Non-Committed flag = Y/Yes/True/1
-    // Capitalization rows are already excluded from lineItems — no extra filter needed.
-    const _isNcFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
-    const _bpRows   = lineItems.filter(li => _isNcFlag(li.nonCommitted));
-    const _bpRaw    = _bpRows.reduce((s, li) => s + (li.net || 0), 0);
-    console.log('[parse] Back Pocket → flaggedRows=' + _bpRows.length + ', rawNetSum=$' + Math.round(_bpRaw/1000) + 'K, displayedAbsValue=$' + Math.round(Math.abs(_bpRaw)/1000) + 'K');
-    summary.backPocket = Math.abs(_bpRaw);
-
-    // Aggregate by vendor
-    const byV = {};
-    for (const li of lineItems) {
-      const k = li.vendor || '(unspecified)';
-      if (!byV[k]) byV[k] = {
-        vendor: k, budget:0, actual:0, forecast:0, risk:0, opp:0, net:0,
-        domains: new Set(), domainOwners: new Set(),
-        monthlyAC: new Array(12).fill(0), monthlyFC: new Array(12).fill(0),
-        lineItems: []
-      };
-      const b = byV[k];
-      b.budget += li.budget; b.actual += li.actual; b.forecast += li.forecast;
-      b.risk += li.risk; b.opp += li.opp; b.net += li.net;
-      if (li.domain) b.domains.add(li.domain);
-      if (li.owner) b.domainOwners.add(li.owner);
-      li.monthlyAC.forEach((v,i)=>{ b.monthlyAC[i]+=v; });
-      li.monthlyFC.forEach((v,i)=>{ b.monthlyFC[i]+=v; });
-      b.lineItems.push(li);
-    }
-    const vendors = Object.values(byV)
-      .map(v => {
-        const catNotes = vendorCatNotes.get(v.vendor.toLowerCase());
-        return {
-          ...v,
-          domains: [...v.domains],
-          domainOwners: [...v.domainOwners],
-          ...(catNotes && catNotes.length ? { categoryNotes: catNotes } : {}),
-        };
-      })
-      .sort((a, b) => b.actual - a.actual);
-
-    // Aggregate by domain owner
-    const byO = {};
-    for (const li of lineItems) {
-      const k = li.owner || 'N/A';
-      if (!byO[k]) byO[k] = {
-        owner: k, budget:0, actual:0, forecast:0, risk:0, opp:0, net:0,
-        vendors: new Set(), domains: new Set()
-      };
-      const o = byO[k];
-      o.budget += li.budget; o.actual += li.actual; o.forecast += li.forecast;
-      o.risk += li.risk; o.opp += li.opp; o.net += li.net;
-      if (li.vendor) o.vendors.add(li.vendor);
-      if (li.domain) o.domains.add(li.domain);
-    }
-    const domainOwners = Object.values(byO).map(o => ({
-      ...o, vendors: [...o.vendors], domains: [...o.domains]
-    }));
-
-    // R&O log = items with material risk/opp
-    const riskOppLog = lineItems
-      .filter(x => Math.abs(x.net) > 100 || Math.abs(x.risk) > 100 || Math.abs(x.opp) > 100)
-      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
-
-    // Lookups for filter bar
-    const lookups = {
-      domains: uniq(lineItems.map(x => x.domain)),
-      categories: uniq(lineItems.map(x => x.category)),
-      subCategories: uniq(lineItems.map(x => x.subCategory)),
-      onestreamCategories: uniq(lineItems.map(x => x.onestreamCategory)),
-      vendors: uniq(lineItems.map(x => x.vendor)),
-      owners: uniq(lineItems.map(x => x.owner)),
-    };
-
-    return {
-      summary, vendors, domainOwners, riskOppLog, lineItems, lookups, workbookSubtotal,
-      // rowScope: documents the row range used for all calculations.
-      // "auto" = formula was read from the SUBTOTAL cell; "fallback" = budget-sum matching.
-      // "none" = no SUBTOTAL row found; all rows processed.
-      rowScope: {
-        source: subtotalRangeEnd ? (workbookSubtotal ? 'auto' : 'fallback') : 'none',
-        maxExcelRow: subtotalRangeEnd || null,
-        rowsIncluded: rowCount,
-        rowsExcluded: (workbookSubtotal ? 1 : 0) + (subtotalRangeEnd ? 0 : 0), // SUBTOTAL + cap + out-of-range
+      {
+        "name": "Indus Valley Partners Corporation",
+        "variance": 807200,
+        "contracts": [
+          {
+            "name": "Prj Mgmt T&M — T&M",
+            "budget": 0,
+            "forecast": 528000,
+            "actual": 0,
+            "risk": 528000,
+            "opp": 0,
+            "notes": "T&M IVP Mgmt (TOM)- Rahul & Vaibhav + 2 for H2-2026 - Risk",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              88,
+              88,
+              88,
+              88,
+              88,
+              88
+            ]
+          },
+          {
+            "name": "Prj Mgmt T&M — T&M",
+            "budget": 216000,
+            "forecast": 495200,
+            "actual": 143200,
+            "risk": 279200,
+            "opp": 0,
+            "notes": "T&M IVP Mgmt (TOM)- Rahul & Vaibhav + 2",
+            "monthly": [
+              88,
+              88,
+              88,
+              88,
+              88,
+              88,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
       },
-    };
+      {
+        "name": "Andersen Tax Holdings",
+        "variance": 95033,
+        "contracts": [
+          {
+            "name": "T&M",
+            "budget": 0,
+            "forecast": 71440,
+            "actual": 0,
+            "risk": 71440,
+            "opp": 0,
+            "notes": "Swati Yadav",
+            "monthly": [
+              0,
+              0,
+              4,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 0,
+            "forecast": 37224,
+            "actual": 7144,
+            "risk": 37224,
+            "opp": 0,
+            "notes": "Danny's extra 1Rivet HC - Risk",
+            "monthly": [
+              0,
+              0,
+              8,
+              8,
+              8,
+              8,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 1505280,
+            "forecast": 1471496,
+            "actual": 342536,
+            "risk": 0,
+            "opp": -33784,
+            "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget",
+            "monthly": [
+              125,
+              125,
+              125,
+              125,
+              125,
+              125,
+              125,
+              125,
+              125,
+              125,
+              125,
+              125
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 414080,
+            "forecast": 443578,
+            "actual": 96538,
+            "risk": 29498,
+            "opp": 0,
+            "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget",
+            "monthly": [
+              39,
+              39,
+              39,
+              39,
+              39,
+              39,
+              39,
+              39,
+              39,
+              39,
+              39,
+              39
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 1438080,
+            "forecast": 1426303,
+            "actual": 347743,
+            "risk": 0,
+            "opp": -11777,
+            "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget",
+            "monthly": [
+              120,
+              120,
+              120,
+              120,
+              120,
+              120,
+              120,
+              120,
+              120,
+              120,
+              120,
+              120
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 291840,
+            "forecast": 294272,
+            "actual": 75392,
+            "risk": 2432,
+            "opp": 0,
+            "notes": "Support SOW + Desktop Support- T&M, QA is not part of our budget",
+            "monthly": [
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Coforge DPA NA Inc.",
+        "variance": -52195,
+        "contracts": [
+          {
+            "name": "T&M",
+            "budget": 403200,
+            "forecast": 512243,
+            "actual": 209843,
+            "risk": 109043,
+            "opp": 0,
+            "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit",
+            "monthly": [
+              34,
+              34,
+              34,
+              34,
+              34,
+              34,
+              34,
+              34,
+              34,
+              34,
+              34,
+              34
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 600000,
+            "forecast": 514000,
+            "actual": 67600,
+            "risk": 0,
+            "opp": -86000,
+            "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit",
+            "monthly": [
+              50,
+              24,
+              24,
+              24,
+              53,
+              53,
+              53,
+              53,
+              53,
+              53,
+              53,
+              53
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 161280,
+            "forecast": 84992,
+            "actual": 36032,
+            "risk": 0,
+            "opp": -76288,
+            "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit",
+            "monthly": [
+              13,
+              13,
+              13,
+              5,
+              5,
+              5,
+              5,
+              5,
+              5,
+              5,
+              5,
+              5
+            ]
+          },
+          {
+            "name": "T&M",
+            "budget": 252000,
+            "forecast": 253050,
+            "actual": 64050,
+            "risk": 1050,
+            "opp": 0,
+            "notes": "T&M - [KA - Feb 23] - Forcast updated from Feb to Dec, based on Raymond's exit. This T&M forecast is adjusted in the new QA contract. Adjusted monthly rate starting Apr based on Shanky's exit",
+            "monthly": [
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Cognizant Worldwide Limited",
+        "variance": -5540,
+        "contracts": [
+          {
+            "name": "D365 CRM — T&M",
+            "budget": 218880,
+            "forecast": 213340,
+            "actual": 49180,
+            "risk": 0,
+            "opp": -5540,
+            "notes": "T&M",
+            "monthly": [
+              18,
+              18,
+              18,
+              18,
+              18,
+              18,
+              18,
+              18,
+              18,
+              18,
+              18,
+              18
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cat": "Software",
+    "variance": 772434,
+    "vendors": [
+      {
+        "name": "Finastra Technology, Inc",
+        "variance": 456079,
+        "contracts": [
+          {
+            "name": "LIQ - Loan IQ — Support - Prod Support for Ops Apps",
+            "budget": 3617396,
+            "forecast": 4073475,
+            "actual": 4073475,
+            "risk": 456079,
+            "opp": 0,
+            "notes": "Recurring License Fee/Maintenance for the period 1-Jan-2026 to 14-Jan-2026 and Subscription Fees for the period 15-Jan-2026 to 14-Jan-2027",
+            "monthly": [
+              334,
+              334,
+              334,
+              334,
+              334,
+              334,
+              334,
+              334,
+              334,
+              334,
+              334,
+              334
+            ]
+          }
+        ]
+      },
+      {
+        "name": "MARKIT NORTH AMERICA, INC.",
+        "variance": 232488,
+        "contracts": [
+          {
+            "name": "Support - Prod Support for Ops Apps",
+            "budget": 0,
+            "forecast": 232488,
+            "actual": 232488,
+            "risk": 232488,
+            "opp": 0,
+            "notes": "WSO Web Services - Subs/ WSO Web/AUM/SubVar- Potential Risk",
+            "monthly": [
+              0,
+              0,
+              0,
+              232,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Indus Valley Partners Corporation",
+        "variance": -215776,
+        "contracts": [
+          {
+            "name": "Polaris/EDM/SecMast Core — Support - Data Analytics Office",
+            "budget": 1051186,
+            "forecast": 835410,
+            "actual": 835410,
+            "risk": 0,
+            "opp": -215776,
+            "notes": "IVP EDM, Polaris, Security Master Year 3 SaaS Fees/ Production License Fee + Annual Consulting Fee for IVP EDM, Polaris, Security Master-Prepaid",
+            "monthly": [
+              103,
+              81,
+              81,
+              81,
+              81,
+              81,
+              81,
+              81,
+              81,
+              81,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "PactFi Inc.",
+        "variance": 132828,
+        "contracts": [
+          {
+            "name": "PactFi Annual Platform Fee — Support - Prod Support for Credit Apps",
+            "budget": 411548,
+            "forecast": 544375,
+            "actual": 544375,
+            "risk": 132828,
+            "opp": 0,
+            "notes": "Year 1 of 3: 1/26/26 to 1/25/27 - Capitalizable",
+            "monthly": [
+              0,
+              0,
+              412,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "Other / minor items",
+            "budget": 0,
+            "forecast": 1,
+            "actual": 0,
+            "risk": 0,
+            "opp": 0,
+            "notes": "",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "CME Group",
+        "variance": 92000,
+        "contracts": [
+          {
+            "name": "LIQ — Support - Prod Support for Ops Apps",
+            "budget": 0,
+            "forecast": 92000,
+            "actual": 92000,
+            "risk": 92000,
+            "opp": 0,
+            "notes": "This was not part of initial budget",
+            "monthly": [
+              0,
+              0,
+              0,
+              92,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Allvue Systems, LLC",
+        "variance": 86226,
+        "contracts": [
+          {
+            "name": "BMS — Support - Prod Support for Credit Apps",
+            "budget": 1778446,
+            "forecast": 1864672,
+            "actual": 1864672,
+            "risk": 86226,
+            "opp": 0,
+            "notes": "Prepaid 2026",
+            "monthly": [
+              155,
+              155,
+              155,
+              155,
+              155,
+              155,
+              155,
+              155,
+              155,
+              155,
+              155,
+              155
+            ]
+          }
+        ]
+      },
+      {
+        "name": "NewRocket, LLC",
+        "variance": 72736,
+        "contracts": [
+          {
+            "name": "ServiceNow Agile Team + Various — Support - Infrastructure for Tech",
+            "budget": 361049,
+            "forecast": 461681,
+            "actual": 461681,
+            "risk": 100632,
+            "opp": 0,
+            "notes": "Prepaid in 2025; to be renewed in Dec 2026-Prepaid in 2025; to be renewed in Dec 2026",
+            "monthly": [
+              42,
+              42,
+              42,
+              42,
+              42,
+              42,
+              42,
+              42,
+              42,
+              42,
+              42,
+              0
+            ]
+          },
+          {
+            "name": "Strategic Portfolio Management (SPM) Pro — Support - Infrastructure for Tech",
+            "budget": 57088,
+            "forecast": 29192,
+            "actual": 0,
+            "risk": 0,
+            "opp": -27896,
+            "notes": "Strategic Portfolio Management (SPM) Pro, paid in Dec2025, to be renewed in Dec2026-Strategic Portfolio Management (SPM) Pro, paid in Dec2025, to be renewed in Dec2026",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              29
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Alation Inc.",
+        "variance": -47911,
+        "contracts": [
+          {
+            "name": "Alation — Support - Data Analytics Office",
+            "budget": 191646,
+            "forecast": 143735,
+            "actual": 128265,
+            "risk": 0,
+            "opp": -47911,
+            "notes": "Contract is Apr-Mar Budegetd 26 - 191K v/s Actual 172K",
+            "monthly": [
+              0,
+              0,
+              0,
+              16,
+              16,
+              16,
+              16,
+              16,
+              16,
+              16,
+              16,
+              16
+            ]
+          }
+        ]
+      },
+      {
+        "name": "OneStream Software, LLC",
+        "variance": -14216,
+        "contracts": [
+          {
+            "name": "Support - Prod support for Finance Applications",
+            "budget": 298544,
+            "forecast": 284328,
+            "actual": 284328,
+            "risk": 0,
+            "opp": -14216,
+            "notes": "Prepaid 2026",
+            "monthly": [
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24,
+              24
+            ]
+          }
+        ]
+      },
+      {
+        "name": "CDW DIRECT LLC",
+        "variance": -6405,
+        "contracts": [
+          {
+            "name": "NCE M365 Jan - Dec Mthly Invoice — Support - Infrastructure for Tech",
+            "budget": 86950,
+            "forecast": 80545,
+            "actual": 3364,
+            "risk": 0,
+            "opp": -6405,
+            "notes": "NCE M365 E5",
+            "monthly": [
+              1,
+              2,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              19
+            ]
+          }
+        ]
+      },
+      {
+        "name": "FinDox Inc.",
+        "variance": -6029,
+        "contracts": [
+          {
+            "name": "FinDox Core — Support - Asset Management Applications",
+            "budget": 238898,
+            "forecast": 232869,
+            "actual": 0,
+            "risk": 0,
+            "opp": -6029,
+            "notes": "Total contract - 342k IT cost 232k recharge to Liquid Credit 109k",
+            "monthly": [
+              0,
+              0,
+              0,
+              233,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Coforge DPA NA Inc.",
+        "variance": -4802,
+        "contracts": [
+          {
+            "name": "UiPath — Support - L2 CoE Management for Tech Horizontals",
+            "budget": 100844,
+            "forecast": 96042,
+            "actual": 96042,
+            "risk": 0,
+            "opp": -4802,
+            "notes": "UiPath Sftwr-UiPath Sftwr",
+            "monthly": [
+              0,
+              101,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Monday.com Ltd",
+        "variance": -3631,
+        "contracts": [
+          {
+            "name": "Management Enterprise 600 Seats — Support - Tech Enablement 2026",
+            "budget": 307614,
+            "forecast": 303983,
+            "actual": 124542,
+            "risk": 0,
+            "opp": -3631,
+            "notes": "Paid as Prepaid in 2025; to be renewed in 2026-Paid as Prepaid in 2025; to be renewed in 2026",
+            "monthly": [
+              25,
+              25,
+              25,
+              25,
+              25,
+              26,
+              26,
+              26,
+              26,
+              26,
+              26,
+              26
+            ]
+          }
+        ]
+      },
+      {
+        "name": "RFPIO INC. (Responsive)",
+        "variance": -3471,
+        "contracts": [
+          {
+            "name": "Implement - Minor Enhancements for Enterprise Apps",
+            "budget": 72889,
+            "forecast": 69418,
+            "actual": 69418,
+            "risk": 0,
+            "opp": -3471,
+            "notes": "",
+            "monthly": [
+              0,
+              0,
+              73,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "SALESFORCE COM INC",
+        "variance": 2253,
+        "contracts": [
+          {
+            "name": "Tableau Creator (5) + Viewer (40) + Explorer (10) — Support - Data Analytics Off",
+            "budget": 44460,
+            "forecast": 46713,
+            "actual": 46713,
+            "risk": 2253,
+            "opp": 0,
+            "notes": "",
+            "monthly": [
+              0,
+              0,
+              44,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Broadridge Output  Solutions",
+        "variance": 2001,
+        "contracts": [
+          {
+            "name": "Centry CLO — Support - Asset Management Applications",
+            "budget": 1091544,
+            "forecast": 1093544,
+            "actual": 598992,
+            "risk": 2000,
+            "opp": 0,
+            "notes": "Quarterly Prepaid",
+            "monthly": [
+              301,
+              0,
+              0,
+              260,
+              0,
+              0,
+              260,
+              0,
+              0,
+              270,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "Other / minor items",
+            "budget": 0,
+            "forecast": 1,
+            "actual": 0,
+            "risk": 0,
+            "opp": 0,
+            "notes": "",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Seismic Software Inc.",
+        "variance": -1330,
+        "contracts": [
+          {
+            "name": "Implement - Minor Enhancements for Enterprise Apps",
+            "budget": 139031,
+            "forecast": 137702,
+            "actual": 79772,
+            "risk": 0,
+            "opp": -1330,
+            "notes": "FPC TBD Dependent on Investor Reporting Integration into Seismic - Prepaid",
+            "monthly": [
+              11,
+              11,
+              11,
+              11,
+              11,
+              11,
+              11,
+              12,
+              12,
+              12,
+              12,
+              12
+            ]
+          },
+          {
+            "name": "Other / minor items",
+            "budget": 0,
+            "forecast": -1,
+            "actual": 0,
+            "risk": 0,
+            "opp": 0,
+            "notes": "",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "HSO Enterprise Solutions LLC",
+        "variance": -600,
+        "contracts": [
+          {
+            "name": "Support - Prod support for Finance Applications",
+            "budget": 12600,
+            "forecast": 12000,
+            "actual": 12000,
+            "risk": 0,
+            "opp": -600,
+            "notes": "",
+            "monthly": [
+              0,
+              13,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Other",
+        "variance": -6,
+        "contracts": []
+      }
+    ]
+  },
+  {
+    "cat": "MS",
+    "variance": 203152,
+    "vendors": [
+      {
+        "name": "Coforge DPA NA Inc.",
+        "variance": 247000,
+        "contracts": [
+          {
+            "name": "Support - QA CoE Management for Tech Horizontals",
+            "budget": 345000,
+            "forecast": 592000,
+            "actual": 99250,
+            "risk": 247000,
+            "opp": 0,
+            "notes": "QA SOW FPC - [KA - Feb23] - Updated forecast from Mar to Dec based on the new contract that superseeded the original one",
+            "monthly": [
+              29,
+              29,
+              42,
+              55,
+              55,
+              55,
+              55,
+              55,
+              55,
+              55,
+              55,
+              55
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Indus Valley Partners Corporation",
+        "variance": -21401,
+        "contracts": [
+          {
+            "name": "Data MS — Support - L2 CoE Management for Tech Horizontals",
+            "budget": 85455,
+            "forecast": 74250,
+            "actual": 27000,
+            "risk": 0,
+            "opp": -11205,
+            "notes": "Data Managed Srvc",
+            "monthly": [
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              7,
+              0
+            ]
+          },
+          {
+            "name": "Polaris/EDM/SecMast Core l2 — Support - L2 CoE Management for Tech Horizontals",
+            "budget": 195584,
+            "forecast": 185388,
+            "actual": 61796,
+            "risk": 0,
+            "opp": -10196,
+            "notes": "IVP L2 Tech MS",
+            "monthly": [
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Virteva LLC",
+        "variance": -10000,
+        "contracts": [
+          {
+            "name": "Support - Enterprise Tech Helpdesk",
+            "budget": 190000,
+            "forecast": 180000,
+            "actual": 60000,
+            "risk": 0,
+            "opp": -10000,
+            "notes": "",
+            "monthly": [
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Archetype Consulting, Inc.",
+        "variance": -7725,
+        "contracts": [
+          {
+            "name": "Support - Prod support for Finance Applications",
+            "budget": 100000,
+            "forecast": 92275,
+            "actual": 31475,
+            "risk": 0,
+            "opp": -7725,
+            "notes": "check for contract copy",
+            "monthly": [
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8,
+              8
+            ]
+          }
+        ]
+      },
+      {
+        "name": "NewRocket, LLC",
+        "variance": -4330,
+        "contracts": [
+          {
+            "name": "ServiceNow — Implement - Minor Enhancements SNOW - Phase 2",
+            "budget": 178500,
+            "forecast": 174170,
+            "actual": 116113,
+            "risk": 0,
+            "opp": -4330,
+            "notes": "Monthly SOW",
+            "monthly": [
+              29,
+              29,
+              29,
+              29,
+              29,
+              29,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Other",
+        "variance": -392,
+        "contracts": []
+      }
+    ]
+  },
+  {
+    "cat": "Infrastructure",
+    "variance": -14371,
+    "vendors": [
+      {
+        "name": "CDW DIRECT LLC",
+        "variance": -11985,
+        "contracts": [
+          {
+            "name": "Support - Infrastructure for Tech",
+            "budget": 180000,
+            "forecast": 168015,
+            "actual": 33015,
+            "risk": 0,
+            "opp": -11985,
+            "notes": "Network Managed Services (Network Operation Centre (NOC))",
+            "monthly": [
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15,
+              15
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Cisco Systems, Inc.",
+        "variance": -1674,
+        "contracts": [
+          {
+            "name": "Support - Infrastructure for Tech",
+            "budget": 1674,
+            "forecast": 0,
+            "actual": 0,
+            "risk": 0,
+            "opp": -1674,
+            "notes": "Webex service  has been cancelled in Dec'25, confirmed by Danny",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Other",
+        "variance": -712,
+        "contracts": []
+      }
+    ]
+  },
+  {
+    "cat": "Hardware",
+    "variance": 59289,
+    "vendors": [
+      {
+        "name": "CDW DIRECT LLC",
+        "variance": 67802,
+        "contracts": [
+          {
+            "name": "Support - Infrastructure for Tech",
+            "budget": 0,
+            "forecast": 75000,
+            "actual": 0,
+            "risk": 75000,
+            "opp": 0,
+            "notes": "2026 Laptops - Danny- Risk",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              75
+            ]
+          },
+          {
+            "name": "Support - Infrastructure for Tech",
+            "budget": 34646,
+            "forecast": 27448,
+            "actual": 1464,
+            "risk": 0,
+            "opp": -7198,
+            "notes": "",
+            "monthly": [
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3,
+              3
+            ]
+          }
+        ]
+      },
+      {
+        "name": "SHI International Corp",
+        "variance": -8513,
+        "contracts": [
+          {
+            "name": "Support - Enterprise Tech Helpdesk",
+            "budget": 81590,
+            "forecast": 66307,
+            "actual": 5115,
+            "risk": 0,
+            "opp": -15283,
+            "notes": "",
+            "monthly": [
+              0,
+              0,
+              20,
+              0,
+              0,
+              20,
+              0,
+              0,
+              20,
+              0,
+              0,
+              20
+            ]
+          },
+          {
+            "name": "Papercut SaaS Maintenance — Support - Infrastructure for Tech",
+            "budget": 0,
+            "forecast": 6770,
+            "actual": 6770,
+            "risk": 6770,
+            "opp": 0,
+            "notes": "Not part of original budget; risk added, category updated from software to hardware since laptop purchase",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cat": "OOE",
+    "variance": 54809,
+    "vendors": [
+      {
+        "name": "G Treasury SS, LLC",
+        "variance": 41250,
+        "contracts": [
+          {
+            "name": "Implement - Cash Matching Recon Solution",
+            "budget": 0,
+            "forecast": 41250,
+            "actual": 0,
+            "risk": 41250,
+            "opp": 0,
+            "notes": "New Risk for cash application matching - new project",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              41
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Norske Finansielle Referanser AS",
+        "variance": 15208,
+        "contracts": [
+          {
+            "name": "Support - Prod Support for Ops Apps",
+            "budget": 0,
+            "forecast": 15208,
+            "actual": 15208,
+            "risk": 15208,
+            "opp": 0,
+            "notes": "",
+            "monthly": [
+              0,
+              0,
+              0,
+              15,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Bloomberg Finance L.P.",
+        "variance": -1821,
+        "contracts": [
+          {
+            "name": "Support - Prod Support for Credit Apps",
+            "budget": 14886,
+            "forecast": 13065,
+            "actual": 3266,
+            "risk": 0,
+            "opp": -1821,
+            "notes": "Subscription",
+            "monthly": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ASX Benchmarks PTY limited",
+        "variance": 574,
+        "contracts": [
+          {
+            "name": "Support - Prod Support for Ops Apps",
+            "budget": 4409,
+            "forecast": 4983,
+            "actual": 4983,
+            "risk": 574,
+            "opp": 0,
+            "notes": "in AUD",
+            "monthly": [
+              4,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Other",
+        "variance": -402,
+        "contracts": []
+      }
+    ]
+  },
+  {
+    "cat": "FPC",
+    "variance": -1353167,
+    "vendors": [
+      {
+        "name": "Indus Valley Partners Corporation",
+        "variance": -884000,
+        "contracts": [
+          {
+            "name": "Polaris/EDM/SecMast Core Implementation — Implement - Build Pipes from CORE Syst",
+            "budget": 1344000,
+            "forecast": 960000,
+            "actual": 480000,
+            "risk": 0,
+            "opp": -384000,
+            "notes": "FPC- IVP Implementation Post Contract - Capitalizable-160K per month from Jan to June 2026 - Capitalizable",
+            "monthly": [
+              160,
+              160,
+              160,
+              160,
+              160,
+              160,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "New FPC BOW — Implement - Odyssey Reporting & Exception Mgmt",
+            "budget": 600000,
+            "forecast": 300000,
+            "actual": 0,
+            "risk": 0,
+            "opp": -300000,
+            "notes": "New 2026 BoW (Capitalizable)",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              50,
+              50,
+              50,
+              50,
+              50,
+              50
+            ]
+          },
+          {
+            "name": "New FPC BOW — Implement - Reporting for Internal Audit",
+            "budget": 500000,
+            "forecast": 300000,
+            "actual": 0,
+            "risk": 0,
+            "opp": -200000,
+            "notes": "New 2026 BoW",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              50,
+              50,
+              50,
+              50,
+              50,
+              50
+            ]
+          }
+        ]
+      },
+      {
+        "name": "MARKIT NORTH AMERICA, INC.",
+        "variance": -330000,
+        "contracts": [
+          {
+            "name": "Implement - WSO Own Instance (AM)",
+            "budget": 850000,
+            "forecast": 600000,
+            "actual": 0,
+            "risk": 0,
+            "opp": -250000,
+            "notes": "New 2026 BoW",
+            "monthly": [
+              0,
+              0,
+              100,
+              200,
+              200,
+              100,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "Implement - WSO Balance Sheet Mig & Reporting",
+            "budget": 500000,
+            "forecast": 420000,
+            "actual": 0,
+            "risk": 0,
+            "opp": -80000,
+            "notes": "New 2026 BoW (Capitalizable)",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              60,
+              60,
+              60,
+              60,
+              60,
+              60,
+              60
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Coforge DPA NA Inc.",
+        "variance": -139167,
+        "contracts": [
+          {
+            "name": "Implement - L1/L2 CoE for Additional Platforms",
+            "budget": 250000,
+            "forecast": 152500,
+            "actual": 0,
+            "risk": 0,
+            "opp": -97500,
+            "notes": "T&M- Implementing CoE for L1/L2 Platforms",
+            "monthly": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              153
+            ]
+          },
+          {
+            "name": "Implement - QA CoE to Additional Platforms",
+            "budget": 250000,
+            "forecast": 208333,
+            "actual": 0,
+            "risk": 0,
+            "opp": -41667,
+            "notes": "New 2026 BoW",
+            "monthly": [
+              0,
+              0,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21,
+              21
+            ]
+          }
+        ]
+      }
+    ]
   }
+];
 
-  // Public API
-  window.parseTechFinancialsXlsx = async function (file) {
-    const buf = await file.arrayBuffer();
-    return parseExcelArrayBuffer(buf);
-  };
-  window.parseTechFinancialsXlsxFromArrayBuffer = parseExcelArrayBuffer;
-})();
+function VarianceExplorerPanel({ initialCat, onClose, varData: varDataProp }) {
+  const [selCat,    setSelCat]    = useStateDR(initialCat||null);
+  const [selVendor, setSelVendor] = useStateDR(null);
+  const [selContr,  setSelContr]  = useStateDR(null);
+  useEffectDR(() => {
+    if (!varDataProp) console.warn('[VarianceExplorerPanel] WARNING: static fallback data used — uploaded workbook data was not provided. Pass varData={buildVarData(items)} from OverviewTab.');
+  }, []);
+  const pickCat = c => { setSelCat(c); setSelVendor(null); setSelContr(null); };
+  const pickVendor = v => { setSelVendor(v); setSelContr(null); };
+  const catRow    = selCat    ? varDataProp || VAR_DATA.find(d=>d.cat===selCat)                         : null;
+  const vendorRow = selVendor ? catRow?.vendors.find(v=>v.name===selVendor)               : null;
+  return (
+    <div className="drill-overlay" onClick={onClose}>
+      <div className="drill-panel drill-panel-wide" onClick={e=>e.stopPropagation()}
+        style={{ display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        <div className="drill-head" style={{ flexShrink:0 }}>
+          <button className="drill-close" onClick={onClose}>✕ close</button>
+          <div style={{ fontSize:10, fontWeight:800, letterSpacing:'0.22em', fontFamily:DRP_SERIF,
+            color:'rgba(255,255,255,0.52)', marginBottom:5, textTransform:'lowercase' }}>
+            forecast variance · budget to forecast · by category and vendor
+          </div>
+          <h2 style={{ margin:'0 0 4px', fontFamily:DRP_SERIF, fontWeight:600, fontSize:22, color:'#fff' }}>
+            Forecast Variance Explorer
+          </h2>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,0.58)' }}>
+            Category → Vendor → Contract · click to drill into root causes
+          </div>
+        </div>
+        <div style={{ flex:1, overflow:'hidden', display:'flex', minHeight:0 }}>
+          {/* Col 1 */}
+          <div style={{ width:210, borderRight:'1px solid var(--color-border)', overflow:'auto', flexShrink:0, background:'#FAFAF8' }}>
+            <div style={{ padding:'9px 14px 7px', fontSize:9, fontWeight:800, letterSpacing:'0.18em',
+              textTransform:'uppercase', color:'var(--antares-stone-gray)', borderBottom:'1px solid var(--color-border)', fontFamily:DRP_SERIF }}>Category</div>
+            {(varDataProp || VAR_DATA).map(d => {
+              const isSel=selCat===d.cat; const fav=d.variance<0; const nil=Math.abs(d.variance)<25000;
+              const col=nil?'var(--antares-stone-gray)':fav?DRP_GREEN:DRP_RED;
+              return (
+                <div key={d.cat} onClick={()=>pickCat(d.cat)} style={{ padding:'11px 14px',
+                  borderBottom:'1px solid var(--color-border)', cursor:'pointer',
+                  background:isSel?DRP_NAVY:'transparent',
+                  display:'flex', justifyContent:'space-between', alignItems:'center', transition:'background 0.1s' }}>
+                  <span style={{ fontSize:13, fontWeight:isSel?600:400, color:isSel?'#fff':'var(--antares-soft-black)' }}>{d.cat}</span>
+                  <span style={{ fontSize:12, fontWeight:600, fontVariantNumeric:'tabular-nums', fontFamily:DRP_SANS,
+                    color:isSel?(fav?'#72D4A0':'#E87878'):col }}>
+                    {nil?'—':(fav?'−':'+')}{nil?'':fmt.k(Math.abs(d.variance))}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {/* Col 2 */}
+          <div style={{ width:250, borderRight:'1px solid var(--color-border)', overflow:'auto', flexShrink:0 }}>
+            {!selCat && <div style={{ padding:'40px 20px', color:'var(--antares-stone-gray)', fontSize:13, textAlign:'center' }}>← Select a category</div>}
+            {catRow && (<>
+              <div style={{ padding:'9px 14px 7px', fontSize:9, fontWeight:800, letterSpacing:'0.18em', textTransform:'uppercase',
+                color:'var(--antares-stone-gray)', borderBottom:'1px solid var(--color-border)', fontFamily:DRP_SERIF,
+                background:'#FAFAF8', display:'flex', justifyContent:'space-between' }}>
+                <span>Vendor</span><span>Variance</span>
+              </div>
+              {catRow.vendors.map(v => {
+                const isSel=selVendor===v.name; const fav=v.variance<0; const col=fav?DRP_GREEN:DRP_RED;
+                return (
+                  <div key={v.name} onClick={()=>pickVendor(v.name)} style={{ padding:'11px 14px',
+                    borderBottom:'1px solid var(--color-border)', cursor:'pointer',
+                    background:isSel?'#EEF3FF':'transparent', display:'flex', justifyContent:'space-between',
+                    alignItems:'center', transition:'background 0.1s' }}>
+                    <span style={{ fontSize:13, fontWeight:isSel?600:400, color:isSel?DRP_NAVY:'var(--antares-soft-black)',
+                      maxWidth:148, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{v.name}</span>
+                    <span style={{ fontSize:12, fontWeight:600, color:col, fontVariantNumeric:'tabular-nums', fontFamily:DRP_SANS, flexShrink:0 }}>
+                      {fav?'−':'+'}{fmt.k(Math.abs(v.variance))}
+                    </span>
+                  </div>
+                );
+              })}
+            </>)}
+          </div>
+          {/* Col 3 */}
+          <div style={{ flex:1, overflow:'auto', background:'#fff' }}>
+            {!selCat && <div style={{ padding:'48px 24px', color:'var(--antares-stone-gray)', fontSize:13 }}>Select a category to begin.</div>}
+            {selCat && !selVendor && <div style={{ padding:'48px 24px', color:'var(--antares-stone-gray)', fontSize:13 }}>← Select a vendor.</div>}
+            {vendorRow && (
+              <div style={{ padding:'18px 22px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', border:'1px solid var(--color-border)', marginBottom:18 }}>
+                  {[['budget',vendorRow.contracts.reduce((s,c)=>s+c.budget,0),DRP_NAVY],
+                    ['forecast',vendorRow.contracts.reduce((s,c)=>s+c.forecast,0),vendorRow.variance<0?DRP_GREEN:DRP_RED],
+                    ['ytd actual',vendorRow.contracts.reduce((s,c)=>s+c.actual,0),DRP_NAVY],
+                    ['net variance',vendorRow.variance,vendorRow.variance<0?DRP_GREEN:DRP_RED]
+                  ].map(([l,v,c],i)=>(
+                    <div key={i} style={{ padding:'11px 13px', borderRight:i<3?'1px solid var(--color-border)':'none', background:'#FAFAF8' }}>
+                      <div style={{ fontSize:9,fontWeight:800,letterSpacing:'0.16em',textTransform:'lowercase',fontFamily:DRP_SERIF,color:'var(--antares-stone-gray)',marginBottom:3 }}>{l}</div>
+                      <div style={{ fontFamily:DRP_SERIF,fontWeight:600,fontSize:17,color:c,fontVariantNumeric:'tabular-nums' }}>
+                        {l==='net variance'?(v<0?'−':'+'):''}{fmt.m(Math.abs(v))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {vendorRow.contracts.map((c,ci)=>{
+                  const open=selContr===c.name;
+                  return (
+                    <div key={ci} style={{ marginBottom:12, border:'1px solid var(--color-border)' }}>
+                      <div onClick={()=>setSelContr(open?null:c.name)} style={{ padding:'11px 14px', cursor:'pointer',
+                        background:open?DRP_NAVY:'#FAFAF8', display:'flex', justifyContent:'space-between', alignItems:'center',
+                        borderBottom:open?'1px solid rgba(255,255,255,0.1)':'none' }}>
+                        <span style={{ fontSize:13,fontWeight:600,color:open?'#fff':DRP_NAVY }}>{c.name}</span>
+                        <span style={{ fontSize:11,color:open?'rgba(255,255,255,0.55)':'var(--antares-stone-gray)' }}>{open?'▾':'▸'} details</span>
+                      </div>
+                      {open && (
+                        <div style={{ padding:'14px' }}>
+                          <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', border:'1px solid var(--color-border)', marginBottom:14 }}>
+                            {[['budget',c.budget,DRP_NAVY],['forecast',c.forecast,c.risk>0?DRP_RED:DRP_GREEN],
+                              ['actuals',c.actual,DRP_NAVY],['risk',c.risk,DRP_RED],['opp',c.opp,DRP_GREEN]
+                            ].map(([l,v,col],i)=>(
+                              <div key={i} style={{ padding:'9px 11px', borderRight:i<4?'1px solid var(--color-border)':'none' }}>
+                                <div style={{ fontSize:9,fontWeight:800,letterSpacing:'0.16em',textTransform:'lowercase',fontFamily:DRP_SERIF,color:'var(--antares-stone-gray)',marginBottom:3 }}>{l}</div>
+                                <div style={{ fontFamily:DRP_SERIF,fontWeight:600,fontSize:14,color:v===0?'var(--antares-stone-gray)':col,fontVariantNumeric:'tabular-nums' }}>
+                                  {v===0?'—':fmt.m(v)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <MonthlyMiniChart monthly={c.monthly} />
+                          {c.notes && (
+                            <div style={{ marginTop:12, padding:'10px 12px', background:'#FAFAF8',
+                              border:'1px solid var(--color-border)', borderLeft:`3px solid ${c.risk>0?DRP_RED:DRP_GREEN}` }}>
+                              <div style={{ fontSize:9,fontWeight:800,letterSpacing:'0.16em',textTransform:'lowercase',fontFamily:DRP_SERIF,color:'var(--antares-stone-gray)',marginBottom:4 }}>notes</div>
+                              <div style={{ fontSize:12,color:'var(--antares-soft-black)',lineHeight:1.65 }}>{c.notes}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── FilterPanel ────────────────────────────────────────────────────────────
+function FilterPanel({ filterState: initState, setFilterState, onClose, lookups: lk }) {
+  const [active, setActive] = useStateDR(initState || { categories:[],vendors:[],domains:[],domainOwners:[],contractTypes:[],riskOppStatus:[] });
+  function toggle(g,v) { const c=active[g]; setActive({...active,[g]:c.includes(v)?c.filter(x=>x!==v):[...c,v]}); }
+  const total = Object.values(active).flat().length;
+  // When a lookups prop is provided (from uploaded workbook), use it.
+  // Fall back to FILTER_OPTS only if no lookups are passed.
+  if (!lk) console.warn('[FilterPanel] WARNING: static fallback data used — uploaded workbook data was not provided. Pass lookups={data.lookups}.');
+  const dynOpts = lk ? {
+    categories:    lk.categories || [],
+    vendors:       lk.vendors    || [],
+    domains:       lk.domains    || [],
+    domainOwners:  lk.owners     || lk.domainOwners || [],
+    contractTypes: lk.contractTypes || [],
+    riskOppStatus: lk.riskOppStatus || [],
+  } : FILTER_OPTS;
+  const SECTS=[
+    {k:'categories',   l:'Category',         opts:dynOpts.categories},
+    {k:'vendors',      l:'Vendor',            opts:dynOpts.vendors},
+    {k:'domains',      l:'Domain',            opts:dynOpts.domains},
+    {k:'domainOwners', l:'Domain Owner',      opts:dynOpts.domainOwners},
+    {k:'contractTypes',l:'Contract Type',     opts:dynOpts.contractTypes},
+    {k:'riskOppStatus',l:'Risk / Opp Status', opts:dynOpts.riskOppStatus},
+  ];
+  return (
+    <div className="drill-overlay" onClick={onClose}>
+      <div className="drill-panel" onClick={e=>e.stopPropagation()}
+        style={{ width:380, maxWidth:'92vw', display:'flex', flexDirection:'column', background:'#fff', overflow:'hidden' }}>
+        <div style={{ background:DRP_NAVY, padding:'20px 24px 18px', flexShrink:0, position:'relative' }}>
+          <button className="drill-close" onClick={onClose}>✕ close</button>
+          <div style={{ fontSize:10,fontWeight:800,letterSpacing:'0.22em',fontFamily:DRP_SERIF,color:'rgba(255,255,255,0.48)',marginBottom:6,textTransform:'lowercase' }}>analysis filters</div>
+          <div style={{ fontFamily:DRP_SERIF,fontWeight:600,fontSize:22,color:'#fff',marginBottom:5 }}>Filter Panel</div>
+          <div style={{ fontSize:12,color:'rgba(255,255,255,0.58)' }}>{total===0?'No active filters — full dataset':''+total+' filter'+(total>1?'s':'')+' active'}</div>
+        </div>
+        <div style={{ flex:1, overflow:'auto' }}>
+          {SECTS.map(sec=>(
+            <div key={sec.k} style={{ borderBottom:'1px solid var(--color-border)' }}>
+              <div style={{ padding:'11px 18px 8px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span style={{ fontSize:11,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',color:DRP_NAVY,fontFamily:DRP_SANS }}>{sec.l}</span>
+                {active[sec.k].length>0 && <button onClick={()=>setActive({...active,[sec.k]:[]})} style={{ background:'none',border:'none',cursor:'pointer',fontSize:11,color:'#6699FF',fontFamily:DRP_SANS,fontWeight:600,padding:0 }}>Clear</button>}
+              </div>
+              <div style={{ display:'flex',flexWrap:'wrap',gap:6,padding:'0 18px 12px' }}>
+                {sec.opts.map(opt=>{
+                  const on=active[sec.k].includes(opt);
+                  return <button key={opt} onClick={()=>toggle(sec.k,opt)} style={{ padding:'5px 10px',fontSize:12,fontWeight:on?600:400,background:on?DRP_NAVY:'#fff',color:on?'#fff':'var(--antares-soft-black)',border:`1px solid ${on?DRP_NAVY:'var(--color-border)'}`,cursor:'pointer',fontFamily:DRP_SANS,transition:'all 0.12s' }}>{opt}</button>;
+                })}
+              </div>
+            </div>
+          ))}
+          <div style={{ padding:'12px 18px',fontSize:11,color:'var(--antares-stone-gray)',fontStyle:'italic' }}>Filters apply to detailed analysis views.</div>
+        </div>
+        <div style={{ padding:'12px 18px',borderTop:'1px solid var(--color-border)',display:'flex',gap:8,background:'#FAFAF8',flexShrink:0 }}>
+          <button onClick={()=>setActive({categories:[],vendors:[],domains:[],domainOwners:[],contractTypes:[],riskOppStatus:[]})} style={{ flex:1,padding:'9px 0',background:'#fff',border:'1px solid var(--color-border)',cursor:'pointer',fontFamily:DRP_SANS,fontSize:13,fontWeight:500,color:'var(--antares-stone-gray)' }}>Reset all</button>
+          <button onClick={()=>{ if(setFilterState) setFilterState(active); onClose(); }} style={{ flex:2,padding:'9px 0',background:DRP_NAVY,border:'none',cursor:'pointer',fontFamily:DRP_SANS,fontSize:13,fontWeight:600,color:'#fff' }}>Apply</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { KPIDrillPanel, NetDrillPanel, VarianceExplorerPanel, FilterPanel });
