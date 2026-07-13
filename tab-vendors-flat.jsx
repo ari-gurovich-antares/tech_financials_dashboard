@@ -158,39 +158,7 @@ function VendorDetail({ vendor: v, onClose }) {
   const maxM   = Math.max(...[...(v.monthlyAC||[]),...(v.monthlyFC||[])].map(Math.abs), 1);
 
   const [expandedCat, setExpandedCat] = useStateV(null);
-  const [detailSort, setDetailSort] = useStateV({ col:'actual', dir:'desc' });
   const lineItems = v.lineItems || [];
-
-  function detailSortValue(li, col) {
-    const ac = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-    const fc = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
-    const actfc = ac + fc;
-    const cons = li.budget > 0 ? actfc / li.budget * 100 : 0;
-    if (col === 'vendor') return (li.vendor || '').toLowerCase();
-    if (col === 'category') return (li.spendCategory || li.subCategory || li.category || '').toLowerCase();
-    if (col === 'budget') return li.budget || 0;
-    if (col === 'actual') return ac;
-    if (col === 'forecast') return fc;
-    if (col === 'actfc') return actfc;
-    if (col === 'cons') return cons;
-    if (col === 'risk') return li.risk || 0;
-    if (col === 'opp') return Math.abs(li.opp || 0);
-    if (col === 'net') return li.net || 0;
-    return 0;
-  }
-
-  function toggleDetailSort(col) {
-    setDetailSort(s => s.col === col ? { col, dir: s.dir==='desc'?'asc':'desc' } : { col, dir:'desc' });
-  }
-
-  const detailTh = (col, label, align='right', extra={}) => (
-    <th
-      onClick={() => toggleDetailSort(col)}
-      style={{ padding:'7px 12px', textAlign:align, fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap', cursor:'pointer', ...extra }}
-    >
-      {label}{detailSort.col===col ? (detailSort.dir==='desc'?' ↓':' ↑') : ''}
-    </th>
-  );
 
 
 
@@ -314,7 +282,7 @@ function VendorDetail({ vendor: v, onClose }) {
                 <tbody>
                   {/* Actuals row */}
                   <tr style={{ borderBottom:'1px solid #F2F0EE' }}>
-                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Actuals</td>
+                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Actual Spend</td>
                     {MONTHS.map((mo, i) => {
                       const ac = (v.monthlyAC||[])[i] || 0;
                       const show = i < actCnt && ac > 0;
@@ -327,7 +295,7 @@ function VendorDetail({ vendor: v, onClose }) {
                   </tr>
                   {/* Forecast row */}
                   <tr style={{ borderBottom:'1px solid #F2F0EE' }}>
-                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Forecast</td>
+                    <td style={{ padding:'10px 14px', fontWeight:600, color:'#1A1F3C', fontSize:12, whiteSpace:'nowrap' }}>Remaining Forecast</td>
                     {MONTHS.map((mo, i) => {
                       const fc = (v.monthlyFC||[])[i] || 0;
                       return (
@@ -366,7 +334,7 @@ function VendorDetail({ vendor: v, onClose }) {
             <div style={{ display:'flex', gap:16, marginTop:8, fontSize:11, color:'#9E9B97', flexWrap:'wrap' }}>
               <span style={{ display:'flex', alignItems:'center', gap:5 }}>
                 <span style={{ width:10, height:10, background:'#333C66', display:'inline-block', borderRadius:1 }}></span>
-                Actuals
+                Actual Spend
               </span>
               <span style={{ display:'flex', alignItems:'center', gap:5 }}>
                 <span style={{ width:10, height:10, background:'#6699FF', display:'inline-block', borderRadius:1 }}></span>
@@ -398,9 +366,9 @@ function VendorDetail({ vendor: v, onClose }) {
                     {/* Level 1 – category row */}
                     <div
                       onClick={() => setExpandedCat(isOpen ? null : cg.category)}
-                      style={{ display:'grid', gridTemplateColumns:'1fr repeat(4,auto)', gap:20, padding:'12px 16px', background: isOpen ? '#EEF0FA' : ci%2===0?'#fff':'#FAFAF8', borderBottom:'1px solid #EDECEA', cursor:'pointer', alignItems:'start' }}
+                      style={{ display:'flex', gap:12, padding:'12px 16px', background: isOpen ? '#EEF0FA' : ci%2===0?'#fff':'#FAFAF8', borderBottom:'1px solid #EDECEA', cursor:'pointer', alignItems:'flex-start', flexWrap:'nowrap' }}
                     >
-                      <div>
+                      <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontWeight:700, fontSize:13, color:'#1A1F3C', display:'flex', alignItems:'center', gap:8 }}>
                           <span style={{ fontSize:9, color: isOpen?'#6699FF':'#B0ADA9', display:'inline-block', transform: isOpen?'rotate(90deg)':'none', transition:'transform 0.15s', lineHeight:1 }}>▶</span>
                           {cg.category}
@@ -410,10 +378,10 @@ function VendorDetail({ vendor: v, onClose }) {
                           <div style={{ fontSize:11, color:'#807E7A', marginTop:5, marginLeft:17, lineHeight:1.45, maxWidth:440 }}>{cg.note}</div>
                         )}
                       </div>
-                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actuals', cg.actual>0?fmt.k(cg.actual):'—'], ['Forecast', fmt.k(cg.forecast)], ['Consumption', cons!==null?`${cons.toFixed(0)}%`:'—'], ['Risk', cg.risk>100?fmt.k(cg.risk):'—'], ['Opp', cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'], ['Net R/(O)', Math.abs(cg.net)>100?fmt.signed(cg.net):'—']].map(([lbl,val],vi) => (
-                        <div key={lbl} style={{ textAlign:'right', minWidth:64 }}>
-                          <div style={{ fontSize:9, color:'#B0ADA9', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3 }}>{lbl}</div>
-                          <div style={{ fontSize:13, fontWeight:700, color: lbl==='Consumption'&&cons!==null ? (cons>100?'#C03A3A':cons>85?'#96600A':'#333C66') : lbl==='Risk'&&cg.risk>100 ? '#C03A3A' : lbl==='Opp'&&cg.opp<-100 ? '#1F7A4D' : lbl==='Net R/(O)' ? (cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2') : '#333C66', fontVariantNumeric:'tabular-nums' }}>{val}</div>
+                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actual Spend', cg.actual>0?fmt.k(cg.actual):'—'], ['Rem. Forecast', fmt.k(cg.forecast)], ['Act+FC', fmt.k(cg.actual+cg.forecast)], ['Consumption', cons!==null?`${cons.toFixed(0)}%`:'—'], ['Risk', cg.risk>100?fmt.k(cg.risk):'—'], ['Opp', cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'], ['Net R/(O)', Math.abs(cg.net)>100?fmt.signed(cg.net):'—']].map(([lbl,val],vi) => (
+                        <div key={lbl} style={{ textAlign:'right', minWidth:52, flexShrink:0 }}>
+                          <div style={{ fontSize:8, color:'#B0ADA9', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3, whiteSpace:'nowrap' }}>{lbl}</div>
+                          <div style={{ fontSize:12, fontWeight:700, color: lbl==='Consumption'&&cons!==null ? (cons>100?'#C03A3A':cons>85?'#96600A':'#333C66') : lbl==='Risk'&&cg.risk>100 ? '#C03A3A' : lbl==='Opp'&&cg.opp<-100 ? '#1F7A4D' : lbl==='Net R/(O)' ? (cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2') : '#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{val}</div>
                         </div>
                       ))}
                     </div>
@@ -421,56 +389,40 @@ function VendorDetail({ vendor: v, onClose }) {
                     {/* Level 2 – project rows */}
                     {isOpen && (
                       <div style={{ background:'#F6F7FB', borderBottom:'1px solid #EDECEA' }}>
-                        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11, minWidth:1400 }}>
+                        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                           <thead>
                             <tr style={{ background:'#EAECF6' }}>
-                              {detailTh('vendor', 'Vendor', 'left', { position:'sticky', left:0, zIndex:2, background:'#EAECF6', paddingLeft:32 })}
-                              {detailTh('category', 'Category', 'left')}
-                              {detailTh('budget', 'Budget')}
-                              {detailTh('actual', 'Actuals')}
-                              {detailTh('forecast', 'Forecast')}
-                              {detailTh('actfc', 'Actuals + Forecast')}
-                              {detailTh('cons', 'Budget Consumption %')}
-                              {detailTh('risk', 'Risk')}
-                              {detailTh('opp', 'Opportunity')}
-                              {detailTh('net', 'Net Risk/Opportunity')}
-                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', minWidth:220 }}>Notes - Risk/Opportunity</th>
+                              <th style={{ padding:'7px 16px 7px 32px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Project / Application</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Budget</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Actual Spend</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Remaining Forecast</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Act+FC</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Opp</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Net R/(O)</th>
+                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {[...(cg.items||[])].sort((a,b) => {
-                              const av = detailSortValue(a, detailSort.col);
-                              const bv = detailSortValue(b, detailSort.col);
-                              const mul = detailSort.dir === 'desc' ? -1 : 1;
-                              if (typeof av === 'string' || typeof bv === 'string') return mul * String(av).localeCompare(String(bv));
-                              return mul * (av - bv);
-                            }).map((li, idx) => {
+                            {cg.items.map((li, idx) => {
                               const acLI = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
                               const fcLI = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
-                              const totalLI = acLI + fcLI;
-                              const consLI = li.budget > 0 ? totalLI / li.budget * 100 : null;
-                              const catLI = li.spendCategory || li.subCategory || li.category || '—';
-                              const noteLI = li.notesRO || li.notes || '';
-                              const rowBg = idx%2===0 ? '#F6F7FB' : '#F0F1F8';
                               return (
-                                <tr key={idx} style={{ borderTop:'1px solid #E4E6F2', background: rowBg }}>
-                                  <td style={{ padding:'8px 12px 8px 32px', color:'#1A1F3C', position:'sticky', left:0, zIndex:1, background:rowBg, minWidth:180 }}>
-                                    <div style={{ fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:180 }} title={li.vendor || v.vendor}>{li.vendor || v.vendor || '—'}</div>
-                                    <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:180 }} title={li.application || li.project || ''}>{li.application || li.project || ''}</div>
+                                <tr key={idx} style={{ borderTop:'1px solid #E4E6F2', background: idx%2===0?'#F6F7FB':'#F0F1F8' }}>
+                                  <td style={{ padding:'8px 12px 8px 32px', color:'#1A1F3C' }}>
+                                    <div style={{ fontWeight:500 }}>{li.application || li.project || '—'}</div>
+                                    {li.project && li.application && <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1 }}>{li.project}</div>}
                                   </td>
-                                  <td style={{ padding:'8px 12px', color:'#1A1F3C', whiteSpace:'nowrap' }}>{catLI}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:li.budget>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{li.budget>0?fmt.k(li.budget):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:acLI>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{acLI>0?fmt.k(acLI):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:fcLI>0?'#333C66':'#D8D6D2', whiteSpace:'nowrap' }}>{fcLI>0?fmt.k(fcLI):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:700, color:'#1A1F3C', whiteSpace:'nowrap' }}>{totalLI>0?fmt.k(totalLI):'—'}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:consLI!==null ? (consLI>100?'#C03A3A':consLI>85?'#96600A':'#333C66') : '#D8D6D2', whiteSpace:'nowrap' }}>{consLI!==null?`${consLI.toFixed(0)}%`:'—'}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(fcLI)}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(acLI+fcLI)}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:(li.risk||0)>100?'#C03A3A':'#D8D6D2' }}>{(li.risk||0)>100?fmt.k(li.risk):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:(li.opp||0)<-100?'#1F7A4D':'#D8D6D2' }}>{(li.opp||0)<-100?fmt.k(Math.abs(li.opp)):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', fontWeight:Math.abs(li.net||0)>100?600:400, color:(li.net||0)>100?'#C03A3A':(li.net||0)<-100?'#1F7A4D':'#D8D6D2' }}>
                                     {Math.abs(li.net||0)>100?fmt.signed(li.net):'—'}
                                   </td>
-                                  <td style={{ padding:'8px 16px 8px 12px', color:'#807E7A', fontSize:10, lineHeight:1.4, wordBreak:'break-word', minWidth:220, maxWidth:320 }}>
-                                    {noteLI || <span style={{ color:'#D8D6D2' }}>—</span>}
+                                  <td style={{ padding:'8px 16px 8px 12px', color:'#807E7A', fontSize:10, lineHeight:1.4, wordBreak:'break-word', maxWidth:200 }}>
+                                    {li.notes || <span style={{ color:'#D8D6D2' }}>—</span>}
                                   </td>
                                 </tr>
                               );
@@ -478,13 +430,10 @@ function VendorDetail({ vendor: v, onClose }) {
                           </tbody>
                           <tfoot>
                             <tr style={{ background:'#EAECF6', borderTop:'2px solid #6699FF30' }}>
-                              <td style={{ padding:'8px 12px 8px 32px', fontWeight:700, color:'#333C66', fontSize:11, position:'sticky', left:0, zIndex:1, background:'#EAECF6' }}>Subtotal</td>
-                              <td />
+                              <td style={{ padding:'8px 12px 8px 32px', fontWeight:700, color:'#333C66', fontSize:11 }}>Subtotal</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.budget>0?fmt.k(cg.budget):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.actual>0?fmt.k(cg.actual):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast)}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k((cg.actual||0)+(cg.forecast||0))}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.budget>0?`${(((cg.actual||0)+(cg.forecast||0))/cg.budget*100).toFixed(0)}%`:'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.risk>100?'#C03A3A':'#D8D6D2' }}>{cg.risk>100?fmt.k(cg.risk):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.opp<-100?'#1F7A4D':'#D8D6D2' }}>{cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2' }}>{Math.abs(cg.net)>100?fmt.signed(cg.net):'—'}</td>
@@ -505,25 +454,13 @@ function VendorDetail({ vendor: v, onClose }) {
   );
 }
 
-// ── Lean 6-column table ────────────────────────────────────────────────────
-const VTR_COLS = [
-  { key:'vendor',   label:'Vendor',                 cls:'',    sort:true  },
-  { key:'cat',      label:'Category',               cls:'',    sort:false },
-  { key:'budget',   label:'Budget',                 cls:'num', sort:true  },
-  { key:'actual',   label:'Actuals',                cls:'num', sort:true  },
-  { key:'fconly',   label:'Forecast',               cls:'num', sort:true  },
-  { key:'actfc',    label:'Actuals + Forecast',     cls:'num', sort:true  },
-  { key:'cons',     label:'Budget Consumption %',   cls:'num', sort:true  },
-  { key:'risk',     label:'Risk',                   cls:'num', sort:true  },
-  { key:'opp',      label:'Opportunity',            cls:'num', sort:true  },
-  { key:'net',      label:'Net Risk/Opportunity',   cls:'num', sort:true, tooltip:'Sum of risk and opportunity positions.\nPositive = net risk. Negative = net opportunity.'  },
-];
-
+// ── Option 3 hierarchical vendor table ───────────────────────────────────
 function VendorTable({ vendors, onSelect, selected }) {
-  const [search, setSearch] = useStateV('');
+  const [search,    setSearch]    = useStateV('');
+  const [sort,      setSort]      = useStateV({ col:'actual', dir:'desc' });
+  const [collapsed, setCollapsed] = useStateV(new Set());
 
-  const [sort,   setSort]   = useStateV({ col:'actual', dir:'desc' });
-const rows = useMemoV(() => {
+  const sortedVendors = useMemoV(() => {
     let list = vendors;
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -533,14 +470,12 @@ const rows = useMemoV(() => {
     const mul = dir === 'desc' ? -1 : 1;
     return [...list].sort((a, b) => {
       if (col === 'vendor') return mul * a.vendor.localeCompare(b.vendor);
-      if (col === 'budget') return mul * ((a.budget||0)   - (b.budget||0));
-      if (col === 'actual') return mul * ((a.actual||0)   - (b.actual||0));
-      if (col === 'fconly') return mul * ((a.forecast - a.actual) - (b.forecast - b.actual));
+      if (col === 'budget') return mul * ((a.budget||0) - (b.budget||0));
+      if (col === 'actual') return mul * ((a.actual||0) - (b.actual||0));
       if (col === 'actfc')  return mul * ((a.forecast||0) - (b.forecast||0));
-      if (col === 'cons')   return mul * ((a.budget>0?a.forecast/a.budget:0) - (b.budget>0?b.forecast/b.budget:0));
-      if (col === 'risk')   return mul * ((a.risk||0)     - (b.risk||0));
+      if (col === 'risk')   return mul * ((a.risk||0) - (b.risk||0));
       if (col === 'opp')    return mul * (Math.abs(a.opp||0) - Math.abs(b.opp||0));
-      if (col === 'net')    return mul * ((a.net||0)      - (b.net||0));
+      if (col === 'net')    return mul * ((a.net||0) - (b.net||0));
       return 0;
     });
   }, [vendors, search, sort]);
@@ -548,6 +483,64 @@ const rows = useMemoV(() => {
   function toggleSort(col) {
     setSort(s => s.col === col ? { col, dir: s.dir==='desc'?'asc':'desc' } : { col, dir:'desc' });
   }
+  function toggleCollapse(name) {
+    setCollapsed(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n; });
+  }
+
+  // Build hierarchical data per vendor
+  const vendorData = useMemoV(() => {
+    return sortedVendors.map(v => {
+      const lis = v.lineItems || [];
+      if (!lis.length) return { v, catList: [], singleRow: true };
+
+      const catMap = new Map();
+      for (const li of lis) {
+        const cat    = li.category    || '(Other)';
+        const subCat = li.subCategory || li.spendCategory || '—';
+        if (!catMap.has(cat)) catMap.set(cat, new Map());
+        const subMap = catMap.get(cat);
+        if (!subMap.has(subCat)) subMap.set(subCat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0 });
+        const g = subMap.get(subCat);
+        g.budget   += li.budget   || 0;
+        g.actual   += li.actual   || 0;
+        g.forecast += li.forecast || 0;
+        g.risk     += li.risk     || 0;
+        g.opp      += li.opp      || 0;
+        g.net      += li.net      || 0;
+      }
+
+      const catList = [];
+      for (const [cat, subMap] of catMap) {
+        const subCats = [...subMap.entries()].map(([subCat, vals]) => ({ subCat, ...vals }));
+        subCats.sort((a, b) => (b.actual||0) - (a.actual||0));
+        const ct = subCats.reduce((a, s) => ({ budget:a.budget+s.budget, actual:a.actual+s.actual, forecast:a.forecast+s.forecast, risk:a.risk+s.risk, opp:a.opp+s.opp, net:a.net+s.net }), { budget:0,actual:0,forecast:0,risk:0,opp:0,net:0 });
+        catList.push({ cat, subCats, ...ct, catRowCount: subCats.length + 1 });
+      }
+      catList.sort((a, b) => (b.actual||0) - (a.actual||0));
+      const totalRowCount = catList.reduce((s, c) => s + c.catRowCount, 0) + 1;
+      return { v, catList, singleRow: false, totalRowCount };
+    });
+  }, [sortedVendors]);
+
+  const SI = ({ col }) => {
+    if (sort.col !== col) return <span style={{ marginLeft:3, opacity:0.25, fontSize:9 }}>↕</span>;
+    return <span style={{ marginLeft:3, fontSize:9 }}>{sort.dir==='desc'?'↓':'↑'}</span>;
+  };
+
+  const numK  = (val, color) => <td className="num" style={{ fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color: color || (Math.abs(val||0)<100?'#D8D6D2':'#1A1F3C') }}>{Math.abs(val||0)>=100?fmt.k(val):'—'}</td>;
+  const numKB = (val, color) => <td className="num" style={{ fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', fontWeight:700, color: color || (Math.abs(val||0)<100?'#D8D6D2':'#333C66') }}>{Math.abs(val||0)>=100?fmt.k(val):'—'}</td>;
+  const riskColor = n => n>100?'#C03A3A':'#D8D6D2';
+  const oppColor  = n => n<-100?'#1F7A4D':'#D8D6D2';
+  const netColor  = n => n>100?'#C03A3A':n<-100?'#1F7A4D':'#D8D6D2';
+
+  const TH = ({ children, col, right }) => (
+    <th onClick={col?()=>toggleSort(col):undefined}
+      style={{ padding:'8px 10px', fontSize:10, fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase',
+        color:'#6699FF', background:'#F4F5FA', whiteSpace:'nowrap', cursor:col?'pointer':'default',
+        textAlign:right?'right':'left', userSelect:'none', borderBottom:'2px solid #EDECEA' }}>
+      {children}{col&&<SI col={col}/>}
+    </th>
+  );
 
 
   return (
@@ -557,115 +550,158 @@ const rows = useMemoV(() => {
         <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:10, gap:12 }}>
           <div>
             <span style={{ fontFamily:'var(--font-serif)', fontSize:16, fontWeight:700, color:'#1A1F3C' }}>All Vendors</span>
-            <span style={{ fontSize:11, color:'#807E7A', marginLeft:10, fontStyle:'italic', letterSpacing:'0.01em' }}>Click any row for full detail · sorted by actual spend</span>
+            <span style={{ fontSize:11, color:'#807E7A', marginLeft:10, fontStyle:'italic', letterSpacing:'0.01em' }}>Click vendor name to expand/collapse · click row for detail · sorted by actual spend</span>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
             <span style={{ fontSize:11, color:'#9E9B97', fontVariantNumeric:'tabular-nums' }}>
-              {rows.length}{rows.length !== vendors.length ? ` of ${vendors.length}` : ''} vendors
+              {sortedVendors.length}{sortedVendors.length !== vendors.length ? ` of ${vendors.length}` : ''} vendors
             </span>
-            <ExportBtn onClick={() => xlsxExport(rows.map(v => ({
+            <ExportBtn onClick={() => xlsxExport(sortedVendors.map(v => ({
               'Vendor': v.vendor,
-              'Domain': (v.domains||[]).join('; '),
-              'Domain Owner': (v.domainOwners||[]).join('; '),
-              'Category': v.cat || '',
               'Budget': v.budget,
-              'Actuals': v.actual,
-              'Forecast': Math.max(0, (v.forecast||0) - (v.actual||0)),
-              'Actuals + Forecast': v.forecast,
-              'Budget Consumption %': v.budget>0 ? (v.forecast/v.budget*100) : null,
+              'Actual Spend': v.actual,
+              'Remaining Forecast': v.forecast - v.actual,
+              'Actual Spend + Remaining Forecast': v.forecast,
               'Risk': v.risk,
               'Opportunity': v.opp,
-              'Net Risk/Opportunity': v.net,
+              'Net Risk/(Opp)': v.net,
             })), 'Vendors')} />
           </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
           <div className="search-box" style={{ minWidth:200 }}>
             <Icon name="search" size={12} color="#807E7A" />
-            <input
-              type="text"
-              placeholder="Search vendors…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} style={{ background:'none', border:'none', cursor:'pointer', color:'#9E9B97', padding:'0 2px', fontSize:14, lineHeight:1, display:'flex', alignItems:'center' }}>×</button>
-            )}
+            <input type="text" placeholder="Search vendors…" value={search} onChange={e => setSearch(e.target.value)} />
+            {search && <button onClick={() => setSearch('')} style={{ background:'none', border:'none', cursor:'pointer', color:'#9E9B97', padding:'0 2px', fontSize:14, lineHeight:1, display:'flex', alignItems:'center' }}>×</button>}
           </div>
         </div>
       </div>
 
       {/* Table */}
-      <div style={{ overflowX:'auto', maxHeight:480, overflowY:'auto' }}>
-        <table className="tbl">
+      <div style={{ overflowX:'auto', maxHeight:560, overflowY:'auto' }}>
+        <table style={{ fontSize:11, borderCollapse:'collapse', width:'100%' }}>
           <thead style={{ position:'sticky', top:0, zIndex:3 }}>
             <tr>
-              {VTR_COLS.map(col => (
-                <th
-                  key={col.key}
-                  className={`${col.cls}${col.sort?' sortable':''}`}
-                  style={{ cursor:col.sort?'pointer':'default', background:'#FAFAF8', whiteSpace:'nowrap' }}
-                  title={col.tooltip || undefined}
-                  onClick={() => col.sort && toggleSort(col.key)}
-                >
-                  {col.label}{col.sort && <SortArrow col={col.key} sort={sort} />}
-                </th>
-              ))}
+              <TH col="vendor">Vendor Name</TH>
+              <TH>Category</TH>
+              <TH>Sub-Category</TH>
+              <TH col="budget" right>Budget</TH>
+              <TH col="actual" right>Actual Spend</TH>
+              <TH right>Remaining Forecast</TH>
+              <TH col="actfc" right>Act. Spend + Rem. FC</TH>
+              <TH col="risk" right>Risk</TH>
+              <TH col="opp" right>Opportunity</TH>
+              <TH col="net" right>Net Risk/Opp</TH>
             </tr>
           </thead>
           <tbody>
-            {rows.map(v => {
-              const st    = vendorStatus(v);
+            {vendorData.map(({ v, catList, singleRow, totalRowCount }) => {
+              const isCollapsed = collapsed.has(v.vendor);
               const isSel = selected?.vendor === v.vendor;
-              const cat   = vendorDomCat(v);
-              return (
-                <tr
-                  key={v.vendor}
-                  className={`clickable${isSel?' selected':''}`}
-                  onClick={() => onSelect(isSel ? null : v)}
-                >
-                  {/* Vendor + status */}
-                  <td style={{ minWidth:200 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <div style={{ width:3, height:18, background:st.color, borderRadius:1.5, flexShrink:0 }} />
-                      <div>
-                        <div style={{ fontWeight:600, color:'#1A1F3C', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:200 }} title={v.vendor}>{v.vendor}</div>
-                        {v.domains?.[0] && <div style={{ fontSize:10, color:'#C8C6C0', marginTop:1 }}>{v.domains[0]}</div>}
-                      </div>
-                    </div>
-                  </td>
-                  {/* Category */}
-                  <td style={{ fontSize:12, whiteSpace:'nowrap', maxWidth:140, overflow:'hidden', textOverflow:'ellipsis' }} title={cat}>{cat}</td>
-                  {/* Budget */}
-                  <td className="num">{v.budget>0?fmt.k(v.budget):<span style={{color:'#D8D6D2'}}>—</span>}</td>
-                  {/* Actuals */}
-                  <td className="num">{v.actual>0?fmt.k(v.actual):<span style={{color:'#D8D6D2'}}>—</span>}</td>
-                  {/* Forecast */}
-                  <td className="num">{fmt.k(v.forecast - v.actual)}</td>
-                  {/* Actuals + Forecast */}
-                  <td className="num" style={{ fontWeight:700, color:'#1A1F3C' }}>{fmt.k(v.forecast)}</td>
-                  {/* Budget Consumption % */}
-                  <td className="num" style={{ fontWeight:600, color:v.budget>0 ? (v.forecast/v.budget>1?'#C03A3A':v.forecast/v.budget>.85?'#96600A':'#333C66') : '#D8D6D2' }}>{v.budget>0?`${(v.forecast/v.budget*100).toFixed(0)}%`:<span style={{color:'#D8D6D2'}}>—</span>}</td>
-                  {/* Risk */}
-                  <td className="num" style={{ color:(v.risk||0)>100?'#C03A3A':'#D8D6D2' }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
-                  {/* Opportunity */}
-                  <td className="num" style={{ color:(v.opp||0)<-100?'#1F7A4D':'#D8D6D2' }}>{(v.opp||0)<-100?fmt.k(Math.abs(v.opp)):'—'}</td>
-                  {/* Net Risk/Opportunity */}
-                  <td className="num">
-                    {Math.abs(v.net)>100
-                      ? <span style={{ color:v.net>0?'#C03A3A':'#1F7A4D', fontWeight:700 }}>{fmt.signed(v.net)}</span>
-                      : <span style={{color:'#D8D6D2'}}>—</span>}
-                  </td>
+              const bdTop = '2px solid #EDECEA';
 
+              // ── Collapsed or no lineItems: single summary row ──
+              if (singleRow || catList.length === 0 || isCollapsed) {
+                return (
+                  <tr key={v.vendor} style={{ borderTop: bdTop, background: isSel ? '#EEF2FF' : '#FAFAF8', cursor:'pointer' }}
+                    onClick={() => onSelect && onSelect(isSel ? null : v)}>
+                    <td style={{ padding:'9px 10px', fontWeight:700, color:'#1A1F3C' }}
+                      onClick={e => { if (!singleRow && catList.length) { e.stopPropagation(); toggleCollapse(v.vendor); } }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        {!singleRow && catList.length > 0 && <span style={{ fontSize:9, color:'#9E9B97' }}>▶</span>}
+                        <span style={{ fontSize:11 }}>{v.vendor}</span>
+                      </div>
+                    </td>
+                    <td colSpan={2} style={{ padding:'9px 10px', color:'#B0ADA9', fontSize:10, fontStyle:'italic' }}>{isCollapsed ? 'click to expand' : '—'}</td>
+                    {numKB(v.budget)}
+                    {numKB(v.actual)}
+                    {numKB(v.forecast - v.actual)}
+                    {numKB(v.forecast)}
+                    <td className="num" style={{ fontWeight:700, color:riskColor(v.risk||0) }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
+                    <td className="num" style={{ fontWeight:700, color:oppColor(v.opp||0) }}>{(v.opp||0)<-100?fmt.k(Math.abs(v.opp)):'—'}</td>
+                    <td className="num" style={{ fontWeight:700, color:netColor(v.net||0) }}>{Math.abs(v.net||0)>100?fmt.signed(v.net):'—'}</td>
+                  </tr>
+                );
+              }
+
+              // ── Expanded: hierarchical rows ──
+              const tableRows = [];
+              let firstRowOfVendor = true;
+
+              catList.forEach((cg, ci) => {
+                const catBg = ci % 2 === 0 ? '#FAFAF8' : '#fff';
+
+                cg.subCats.forEach((sc, si) => {
+                  const isFirstOfCat = si === 0;
+                  const key = `${v.vendor}||${cg.cat}||${sc.subCat}||${si}`;
+
+                  tableRows.push(
+                    <tr key={key} style={{ borderTop: firstRowOfVendor ? bdTop : isFirstOfCat ? '1px solid #E8E6E2' : 'none', background: isSel ? '#EEF2FF' : catBg, cursor:'pointer' }}
+                      onClick={() => onSelect && onSelect(isSel ? null : v)}>
+                      {firstRowOfVendor && (
+                        <td rowSpan={totalRowCount} style={{ fontWeight:700, color:'#1A1F3C', padding:'9px 10px', verticalAlign:'top', borderRight:'1px solid #EDECEA', background: isSel ? '#E8ECFF' : '#F4F5FA', cursor:'pointer' }}
+                          onClick={e => { e.stopPropagation(); toggleCollapse(v.vendor); onSelect && onSelect(isSel ? null : v); }}>
+                          <div style={{ display:'flex', alignItems:'flex-start', gap:6 }}>
+                            <span style={{ fontSize:9, color:'#9E9B97', marginTop:2, flexShrink:0 }}>▼</span>
+                            <span style={{ fontSize:11, lineHeight:1.35 }}>{v.vendor}</span>
+                          </div>
+                        </td>
+                      )}
+                      {isFirstOfCat && (
+                        <td rowSpan={cg.catRowCount} style={{ fontWeight:600, color:'#333C66', padding:'9px 10px', verticalAlign:'top', borderRight:'1px solid #F0EEE9', background: isSel ? '#EEF2FF' : catBg }}>
+                          {cg.cat}
+                        </td>
+                      )}
+                      <td style={{ padding:'7px 10px', color:'#1A1F3C' }}>{sc.subCat}</td>
+                      {numK(sc.budget)}
+                      {numK(sc.actual)}
+                      {numK(sc.forecast - sc.actual)}
+                      {numK(sc.forecast)}
+                      <td className="num" style={{ color:riskColor(sc.risk||0) }}>{(sc.risk||0)>100?fmt.k(sc.risk):'—'}</td>
+                      <td className="num" style={{ color:oppColor(sc.opp||0) }}>{(sc.opp||0)<-100?fmt.k(Math.abs(sc.opp)):'—'}</td>
+                      <td className="num" style={{ color:netColor(sc.net||0) }}>{Math.abs(sc.net||0)>100?fmt.signed(sc.net):'—'}</td>
+                    </tr>
+                  );
+                  firstRowOfVendor = false;
+                });
+
+                // Category subtotal row
+                tableRows.push(
+                  <tr key={`${v.vendor}||${cg.cat}||subtotal`} style={{ background: isSel ? '#E4E8FF' : ci%2===0 ? '#EDEFF8' : '#E8EAF4', cursor:'pointer' }}
+                    onClick={() => onSelect && onSelect(isSel ? null : v)}>
+                    {/* vendor + category cells are rowspanned */}
+                    <td style={{ padding:'7px 10px', fontWeight:700, color:'#333C66', fontSize:10, fontStyle:'italic', letterSpacing:'0.04em' }}>Subtotal</td>
+                    {numKB(cg.budget)}
+                    {numKB(cg.actual)}
+                    {numKB(cg.forecast - cg.actual)}
+                    {numKB(cg.forecast)}
+                    <td className="num" style={{ fontWeight:700, color:riskColor(cg.risk||0) }}>{(cg.risk||0)>100?fmt.k(cg.risk):'—'}</td>
+                    <td className="num" style={{ fontWeight:700, color:oppColor(cg.opp||0) }}>{(cg.opp||0)<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
+                    <td className="num" style={{ fontWeight:700, color:netColor(cg.net||0) }}>{Math.abs(cg.net||0)>100?fmt.signed(cg.net):'—'}</td>
+                  </tr>
+                );
+              });
+
+              // Total row
+              tableRows.push(
+                <tr key={`${v.vendor}||total`} style={{ background: isSel ? '#D8DDFF' : '#E2E4F0', borderTop:'1px solid #C8CBE0', cursor:'pointer' }}
+                  onClick={() => onSelect && onSelect(isSel ? null : v)}>
+                  {/* vendor cell is rowspanned */}
+                  <td colSpan={2} style={{ padding:'8px 10px', fontWeight:800, color:'#1A1F3C', fontSize:11 }}>Total</td>
+                  <td className="num" style={{ fontWeight:800, color:'#1A1F3C' }}>{v.budget>0?fmt.k(v.budget):'—'}</td>
+                  <td className="num" style={{ fontWeight:800, color:'#1A1F3C' }}>{v.actual>0?fmt.k(v.actual):'—'}</td>
+                  <td className="num" style={{ fontWeight:800, color:'#1A1F3C' }}>{fmt.k(v.forecast - v.actual)}</td>
+                  <td className="num" style={{ fontWeight:800, color:'#1A1F3C' }}>{fmt.k(v.forecast)}</td>
+                  <td className="num" style={{ fontWeight:800, color:riskColor(v.risk||0) }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
+                  <td className="num" style={{ fontWeight:800, color:oppColor(v.opp||0) }}>{(v.opp||0)<-100?fmt.k(Math.abs(v.opp)):'—'}</td>
+                  <td className="num" style={{ fontWeight:800, color:netColor(v.net||0) }}>{Math.abs(v.net||0)>100?fmt.signed(v.net):'—'}</td>
                 </tr>
               );
+
+              return tableRows;
             })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={10} style={{ textAlign:'center', padding:'40px 20px', color:'#9E9B97', fontSize:13 }}>
-                  No vendors match
-                </td>
-              </tr>
+            {sortedVendors.length === 0 && (
+              <tr><td colSpan={10} style={{ textAlign:'center', padding:'40px 20px', color:'#9E9B97', fontSize:13 }}>No vendors match</td></tr>
             )}
           </tbody>
         </table>
@@ -811,7 +847,7 @@ function VendorsTab({ data }) {
       <VendorKPIs vendors={realVendors} kpi={data.workbookSubtotal} />
       <VendorTable vendors={realVendors} onSelect={setSelected} selected={currentVendor} />
 
-      {/* ── Budget vs Actuals vs Forecast chart ── */}
+      {/* ── Budget vs Actual Spend vs Remaining Forecast chart ── */}
       <div style={{ marginTop: 20 }}>
         <VendorBudgetActualsChart vendors={realVendors} onSelect={setSelected} />
       </div>
@@ -949,7 +985,7 @@ function VendorRisksOppsChart({ vendors, n = 10, onSelect }) {
   );
 }
 
-// ── Annual Budget vs YTD Actuals vs Forecast – Top 10 ──────────
+// ── Annual Budget vs YTD Actual Spend vs Remaining Forecast – Top 10 ──────────
 function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
   const [hoveredVendor, setHoveredVendor] = useStateV(null);
   const top = useMemoV(() => {
@@ -959,41 +995,45 @@ function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
       .slice(0, n);
   }, [vendors, n]);
 
-  const max = top[0] ? (top[0].budget || 0) : 1;
+  const max = useMemoV(() => Math.max(...top.map(v => Math.max(v.budget || 0, v.forecast || 0)), 1), [top]);
+  const BAR_H = 200;
 
-  const SERIES = [
-    { key: 'budget',    label: 'annual budget',       color: '#333C66' },
-    { key: 'actuals',   label: 'ytd actual spend',   color: '#6699FF' },
-    { key: 'remaining', label: 'remaining forecast',  color: '#E8873A' },
+  const LEGEND = [
+    { label: 'Annual Budget',            color: '#333C66' },
+    { label: 'YTD Actual Spend',         color: '#6699FF' },
+    { label: 'Remaining Forecast',       color: '#E8873A' },
   ];
 
   return (
     <div className="card" style={{ padding: '24px 28px', marginBottom: 20 }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, gap: 16 }}>
         <div>
           <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 700, color: '#1A1F3C', marginBottom: 3 }}>
-            Top 10 Vendors – Annual Budget vs YTD Actuals vs Forecast
+            Top 10 Vendors – Annual Budget vs YTD Actual Spend vs Remaining Forecast
           </div>
           <div style={{ fontSize: 11, color: '#9E9B97' }}>Top 10 vendors ranked by Annual Budget · descending</div>
         </div>
-        <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#807E7A', flexShrink: 0, alignItems: 'center' }}>
-          {SERIES.map(s => (
-            <span key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 12, height: 10, background: s.color, display: 'inline-block', borderRadius: 1 }}></span>
+        <div style={{ display: 'flex', gap: 14, fontSize: 11, color: '#807E7A', flexShrink: 0, alignItems: 'center' }}>
+          {LEGEND.map(s => (
+            <span key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 10, height: 10, background: s.color, display: 'inline-block', borderRadius: 1 }}></span>
               {s.label}
             </span>
           ))}
         </div>
       </div>
 
-      {/* Rows */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* Chart */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, overflowX: 'auto', paddingBottom: 8 }}>
         {top.map((v, i) => {
           const budget    = v.budget || 0;
           const actuals   = v.actual || 0;
           const remaining = Math.max(0, (v.forecast || 0) - actuals);
-          const vals      = [budget, actuals, remaining];
+          const budgetH   = max > 0 ? (budget / max) * BAR_H : 0;
+          const actualsH  = max > 0 ? (actuals / max) * BAR_H : 0;
+          const remainH   = max > 0 ? (remaining / max) * BAR_H : 0;
+          const isHov     = hoveredVendor === v.vendor;
 
           return (
             <div
@@ -1002,41 +1042,30 @@ function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
               onMouseEnter={() => setHoveredVendor(v.vendor)}
               onMouseLeave={() => setHoveredVendor(null)}
               style={{
-                display: 'grid',
-                gridTemplateColumns: '190px 1fr 170px',
-                alignItems: 'center',
-                gap: 16,
-                padding: '10px 8px',
-                borderBottom: i < top.length - 1 ? '1px solid #F2F0EE' : 'none',
+                flex: 1, minWidth: 60, maxWidth: 120,
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
                 cursor: onSelect ? 'pointer' : 'default',
+                padding: '0 4px',
                 borderRadius: 4,
-                background: hoveredVendor === v.vendor ? '#F4F6FF' : 'transparent',
+                background: isHov ? '#F4F6FF' : 'transparent',
                 transition: 'background 0.12s',
-              }}>
-              {/* Vendor name */}
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1F3C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vendor}>
-                {v.vendor}
-              </span>
-
+              }}
+            >
               {/* Bars */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {SERIES.map((s, si) => {
-                  const pct = max > 0 ? Math.min((vals[si] / max) * 100, 100) : 0;
-                  return (
-                    <div key={s.key} style={{ height: 10, background: '#EDECEA', borderRadius: 2, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: s.color, borderRadius: 2, transition: 'width 0.3s ease' }} />
-                    </div>
-                  );
-                })}
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: BAR_H, width: '100%', justifyContent: 'center' }}>
+                {/* Bar 1: Budget */}
+                <div style={{ width: '38%', height: budgetH, background: '#333C66', borderRadius: '3px 3px 0 0', minHeight: budget > 0 ? 2 : 0, transition: 'height 0.3s' }} title={`Budget: ${fmt.k(budget)}`} />
+                {/* Bar 2: Stacked Actual + Remaining */}
+                <div style={{ width: '38%', height: actualsH + remainH, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', borderRadius: '3px 3px 0 0', overflow: 'hidden', minHeight: (actuals + remaining) > 0 ? 2 : 0 }}>
+                  <div style={{ height: remainH, background: '#E8873A', flexShrink: 0 }} title={`Remaining Forecast: ${fmt.k(remaining)}`} />
+                  <div style={{ height: actualsH, background: '#6699FF', flexShrink: 0 }} title={`Actual Spend: ${fmt.k(actuals)}`} />
+                </div>
               </div>
-
-              {/* Values */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' }}>
-                {SERIES.map((s, si) => (
-                  <span key={s.key} style={{ fontSize: 11, fontWeight: 700, color: s.color, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
-                    {fmt.m2(vals[si])}
-                  </span>
-                ))}
+              {/* Baseline */}
+              <div style={{ width: '100%', height: 1, background: '#EDECEA', margin: '4px 0' }} />
+              {/* Label */}
+              <div style={{ fontSize: 9, fontWeight: 600, color: '#807E7A', textAlign: 'center', lineHeight: 1.3, marginTop: 4, wordBreak: 'break-word' }}>
+                {v.vendor.length > 16 ? v.vendor.slice(0, 15) + '…' : v.vendor}
               </div>
             </div>
           );
