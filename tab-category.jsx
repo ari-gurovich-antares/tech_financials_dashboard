@@ -1,238 +1,125 @@
-// Filter bar — global controls that drive every tab
-const { useState: useStateF, useRef: useRefF, useEffect: useEffectF } = React;
+// Category tab — Annual Budget vs Year-End Forecast by Category
+// "Category" in this tab maps to Sub-Category1 from the Master Data
+const { useMemo: useMemoC } = React;
 
-const PERIOD_RANGES = {
-  'full': { months: [0,1,2,3,4,5,6,7,8,9,10,11], label: 'Full Year' },
-  'ytd':  { months: [0,1,2], label: 'YTD (Mar)' },
-  'q1':   { months: [0,1,2], label: 'Q1' },
-  'q2':   { months: [3,4,5], label: 'Q2' },
-  'q3':   { months: [6,7,8], label: 'Q3' },
-  'q4':   { months: [9,10,11], label: 'Q4' },
-};
+function CategoryTab({ data }) {
+  // Aggregate by Sub-Category1 (displayed as "Category")
+  const rows = useMemoC(() => {
+    const map = {};
+    (data.lineItems || []).forEach(li => {
+      // Apply the same global filters that already shape data.vendors
+      // (we re-aggregate from lineItems here for accuracy on this view)
+      const key = li.subCategory || '— Uncategorized —';
+      if (!map[key]) map[key] = { name: key, budget: 0, actual: 0, forecast: 0, net: 0, count: 0 };
+      map[key].budget += li.budget;
+      map[key].actual += li.actual;
+      map[key].forecast += li.forecast;
+      map[key].net += li.net;
+      map[key].count += 1;
+    });
+    // Apply current filter set (mirrors filter-bar's filterLineItems but quickly)
+    return Object.values(map)
+      .map(r => ({ ...r, yef: r.budget + r.net }))
+      .sort((a,b) => b.budget - a.budget);
+  }, [data]);
 
-function Segmented({ options, value, onChange }) {
-  return (
-    <div className="seg-ctrl">
-      {options.map(o => (
-        <button
-          key={o.value}
-          className={`seg-btn ${value === o.value ? 'active' : ''}`}
-          onClick={() => onChange(o.value)}
-        >{o.label}</button>
-      ))}
-    </div>
-  );
-}
+  // Use filtered line items if available
+  const filteredRows = useMemoC(() => {
+    const f = data.filters || {};
+    const items = (typeof window.filterLineItems === 'function' && data.lineItems)
+      ? window.filterLineItems(data.lineItems, f)
+      : (data.lineItems || []);
+    const map = {};
+    items.forEach(li => {
+      const key = li.subCategory || '— Uncategorized —';
+      if (!map[key]) map[key] = { name: key, budget: 0, actual: 0, forecast: 0, net: 0, count: 0 };
+      map[key].budget += li.budget;
+      map[key].actual += li.actual;
+      map[key].forecast += li.forecast;
+      map[key].net += li.net;
+      map[key].count += 1;
+    });
+    return Object.values(map)
+      .map(r => ({ ...r, yef: r.budget + r.net }))
+      .sort((a,b) => b.budget - a.budget);
+  }, [data]);
 
-function MultiSelect({ label, options, selected, onChange, allLabel }) {
-  const [open, setOpen] = useStateF(false);
-  const ref = useRefF();
-  useEffectF(() => {
-    function close(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
-  const isAll = selected.length === 0;
-  const display = isAll ? `${allLabel} ${options.length}` : selected.length === 1 ? selected[0] : `${selected.length} selected`;
-
-  function handleAll() {
-    // If in no-filter mode, expand to explicit-all so user can uncheck individual items
-    // If in some/explicit mode, go back to no-filter
-    if (isAll) onChange(options);
-    else       onChange([]);
-  }
-
-  function toggle(o) {
-    const base = isAll ? options : selected;
-    const next = base.includes(o) ? base.filter(x => x !== o) : [...base, o];
-    onChange(next.length === options.length ? [] : next);
-  }
-
-  // An item is visually checked if we're in all-mode OR it's explicitly in selected
-  const isChecked = o => isAll || selected.includes(o);
-  const allChecked = isAll || selected.length === options.length;
+  const display = filteredRows.length ? filteredRows : rows;
+  const totalBudget = display.reduce((s,r) => s + r.budget, 0);
+  const totalYef = display.reduce((s,r) => s + r.yef, 0);
+  const max = Math.max(...display.map(r => Math.max(r.budget, r.yef)), 1);
 
   return (
-    <div className="ms" ref={ref}>
-      <button className="ms-trigger" onClick={() => setOpen(!open)}>
-        <span style={{maxWidth: 180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{display}</span>
-        <span className="ms-caret">▾</span>
-      </button>
-      {open && (
-        <div className="ms-menu">
-          {/* All checkbox */}
-          <button className="ms-opt all" onClick={handleAll}>
-            <span className="ms-check">{allChecked ? '●' : '○'}</span> {allLabel} ({options.length})
-          </button>
-          <div className="ms-divider" />
-          {options.map(o => (
-            <button key={o} className="ms-opt" onClick={() => toggle(o)}>
-              <span className="ms-check">{isChecked(o) ? '●' : '○'}</span>
-              <span style={{flex:1, overflow:'hidden', textOverflow:'ellipsis'}}>{o}</span>
-            </button>
-          ))}
+    <div>
+      {/* Hero summary strip */}
+      <div className="kpi-grid mb-4" style={{gridTemplateColumns:'repeat(3,1fr)'}}>
+        <div className="kpi">
+          <div className="kpi-label">categories</div>
+          <div className="kpi-value">{display.length}</div>
+          <div className="kpi-sub">distinct sub-category1 buckets</div>
         </div>
-      )}
-    </div>
-  );
-}
-
-const CATEGORY_ORDER = [
-  'Labor/T&M',
-  'Managed Service',
-  'Managed Service(MS)',
-  'Fixed Price Contract',
-  'Fixed Price Contract(FPC)',
-  'Software',
-  'Hardware',
-  'Infrastructure',
-  'Other Operating Expense',
-  'Other Operating Expense(OOE)',
-];
-function sortCategories(cats) {
-  if (!cats) return cats;
-  return [...cats].sort((a, b) => {
-    const ai = CATEGORY_ORDER.findIndex(o => a && a.toLowerCase().startsWith(o.toLowerCase()));
-    const bi = CATEGORY_ORDER.findIndex(o => b && b.toLowerCase().startsWith(o.toLowerCase()));
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
-}
-
-function FilterBar({ filters, setFilters, lookups }) {
-  function update(k, v) { setFilters({ ...filters, [k]: v }); }
-  return (
-    <div className="filter-bar">
-      <div className="fb-row">
-        <span className="fb-lbl">view</span>
-        <Segmented
-          value={filters.view}
-          onChange={(v) => update('view', v)}
-          options={[
-            { value: 'actuals', label: 'Actuals only' },
-            { value: 'forecast', label: 'Forecast only' },
-            { value: 'both', label: 'Actuals + Forecast' },
-          ]}
-        />
-        <span className="fb-lbl">period</span>
-        <Segmented
-          value={filters.period}
-          onChange={(v) => update('period', v)}
-          options={[
-            { value: 'full', label: 'Full year' },
-            { value: 'ytd', label: 'YTD (Mar)' },
-            { value: 'q1', label: 'Q1' },
-            { value: 'q2', label: 'Q2' },
-            { value: 'q3', label: 'Q3' },
-            { value: 'q4', label: 'Q4' },
-          ]}
-        />
-        <span className="fb-lbl">domain</span>
-        <MultiSelect label="Domain" options={lookups.domains} selected={filters.domains} onChange={(v)=>update('domains', v)} allLabel="All" />
-        <span className="fb-lbl">category</span>
-        <MultiSelect label="Category" options={sortCategories(lookups.categories)} selected={filters.categories} onChange={(v)=>update('categories', v)} allLabel="All" />
-        <span className="fb-lbl">onestream cat.</span>
-        <MultiSelect label="OneStream Category" options={lookups.onestreamCategories || []} selected={filters.onestreamCategories} onChange={(v)=>update('onestreamCategories', v)} allLabel="All" />
-        <span className="fb-lbl">sub-category1</span>
-        <MultiSelect label="Sub-Category1" options={lookups.subCategories || []} selected={filters.subCategories || []} onChange={(v)=>update('subCategories', v)} allLabel="All" />
+        <div className="kpi">
+          <div className="kpi-label">total annual budget</div>
+          <div className="kpi-value">{fmt.m(totalBudget)}</div>
+          <div className="kpi-sub">sum across categories</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-label">total year-end forecast</div>
+          <div className="kpi-value" style={{color: totalYef > totalBudget ? 'var(--risk-red)' : 'var(--antares-signature-navy)'}}>{fmt.m(totalYef)}</div>
+          <div className="kpi-sub">{fmt.signed(totalYef - totalBudget)} vs budget</div>
+        </div>
       </div>
-      <div className="fb-row">
-        <span className="fb-lbl">vendor</span>
-        <MultiSelect label="Vendor" options={lookups.vendors} selected={filters.vendors} onChange={(v)=>update('vendors', v)} allLabel="All" />
-        <button className="fb-reset" onClick={() => setFilters({ view:'both', period:'full', domains:[], categories:[], onestreamCategories:[], subCategories:[], vendors:[], units: filters.units })}>Reset filters</button>
-        <div style={{flex:1}} />
-        <span className="fb-lbl">units</span>
-        <Segmented
-          value={filters.units}
-          onChange={(v)=>update('units', v)}
-          options={[
-            { value:'auto', label:'Auto' },
-            { value:'M', label:'$M' },
-            { value:'K', label:'$K' },
-            { value:'1', label:'$' },
-          ]}
-        />
+
+      {/* Bar chart card */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Annual Budget vs Year-End Forecast by Category</div>
+            <div className="card-sub">Sorted by Annual Budget · descending</div>
+          </div>
+          <div className="flex gap-3 fs-tiny text-stone">
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#333C66',display:'inline-block'}}/>annual budget</span>
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#6699FF',display:'inline-block'}}/>year-end forecast</span>
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'var(--risk-red)',display:'inline-block'}}/>over budget</span>
+          </div>
+        </div>
+        <div>
+          {display.map(r => {
+            const bw = (r.budget / max) * 100;
+            const fw = (r.yef / max) * 100;
+            const over = r.yef > r.budget;
+            return (
+              <div key={r.name} style={{display:'grid', gridTemplateColumns:'220px 1fr 240px', gap:14, alignItems:'center', padding:'10px 0', borderBottom:'1px solid var(--grid-line)'}}>
+                <div>
+                  <div style={{fontWeight:600, color:'var(--antares-signature-navy)', fontSize:13}}>{r.name}</div>
+                  <div className="fs-tiny text-stone">{r.count} line item{r.count===1?'':'s'}</div>
+                </div>
+                <div style={{display:'grid', gridTemplateRows:'1fr 1fr', gap:4}}>
+                  <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
+                    <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${bw}%`, background:'#333C66'}} />
+                    <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)', fontVariantNumeric:'tabular-nums'}}>budget</div>
+                  </div>
+                  <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
+                    <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${fw}%`, background: over ? 'var(--risk-red)' : '#6699FF'}} />
+                    <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)', fontVariantNumeric:'tabular-nums'}}>forecast</div>
+                  </div>
+                </div>
+                <div className="text-right tabular fs-small" style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6}}>
+                  <span style={{color:'var(--antares-signature-navy)', fontWeight:600}}>{fmt.k(r.budget)}</span>
+                  <span style={{color: over ? 'var(--risk-red)' : 'var(--antares-bright-blue-600)', fontWeight:600}}>{fmt.k(r.yef)}</span>
+                  <span style={{color: over ? 'var(--risk-red)' : 'var(--opp-green)', fontWeight:600}}>{fmt.signed(r.yef - r.budget)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-between fs-tiny text-stone mt-3" style={{borderTop:'1px solid var(--grid-line)', paddingTop: 8}}>
+          <span>annual budget · year-end forecast · variance</span>
+          <span>total: {fmt.m(totalBudget)} → {fmt.m(totalYef)} ({fmt.signed(totalYef - totalBudget)})</span>
+        </div>
       </div>
     </div>
   );
 }
 
-// Helper: filter line items per the current filter state
-function filterLineItems(lineItems, f) {
-  return lineItems.filter(li => {
-    if (f.domains.length > 0 && !f.domains.includes(li.domain)) return false;
-    if (f.categories.length > 0 && !f.categories.includes(li.category)) return false;
-    if (f.onestreamCategories && f.onestreamCategories.length > 0 && !f.onestreamCategories.includes(li.onestreamCategory)) return false;
-    if (f.subCategories && f.subCategories.length > 0 && !f.subCategories.includes(li.subCategory)) return false;
-    if (f.vendors.length > 0 && !f.vendors.includes(li.vendor)) return false;
-    return true;
-  });
-}
-
-// Helper: aggregate filtered line items into the same shape as data.summary / vendors / owners
-function aggregate(lineItems, period, view) {
-  const months = PERIOD_RANGES[period].months;
-  const sumMonths = (arr) => months.reduce((s,i)=>s+(arr[i]||0), 0);
-
-  let actualTotal = 0, forecastTotal = 0, riskTotal = 0, oppTotal = 0, budgetTotal = 0;
-  const monthlyACTotal = new Array(12).fill(0);
-  const monthlyFCTotal = new Array(12).fill(0);
-
-  for (const li of lineItems) {
-    actualTotal += sumMonths(li.monthlyAC);
-    forecastTotal += sumMonths(li.monthlyFC);
-    // Risk/Opp from monthly distribution restricted to period
-    const ro = sumMonths(li.monthlyOR);
-    if (ro > 0) oppTotal += ro;
-    if (ro < 0) riskTotal += -ro;
-    // Budget: prorate across selected months (12 months in dataset)
-    budgetTotal += (li.budget * (months.length / 12));
-    li.monthlyAC.forEach((v,i)=>{ monthlyACTotal[i]+=v; });
-    li.monthlyFC.forEach((v,i)=>{ monthlyFCTotal[i]+=v; });
-  }
-  // Note: Risk = unfavorable (positive net), Opp = favorable (negative net)
-  // Original convention in source: Risk col positive = unfav, Opp col negative = fav
-  // Recompute from totals using line-item sums of risk/opp columns when full period
-  let displayRisk = 0, displayOpp = 0;
-  if (period === 'full') {
-    displayRisk = lineItems.reduce((s,li)=>s+li.risk, 0);
-    displayOpp = lineItems.reduce((s,li)=>s+li.opp, 0);
-  } else {
-    // For period subsets, sum monthly Opp/Risk where positive = opp (favorable) in source convention
-    const periodOR = lineItems.reduce((s,li) => s + sumMonths(li.monthlyOR), 0);
-    // monthlyOR: positive = opp (per source), negative = risk
-    // But total Opp/Risk col in source = unfav reduces it. Let's keep: displayRisk = positive amount of NetPosition impact
-    // Net contribution from monthlyOR for period (source semantics)
-    // For simplicity in period mode, separate positive/negative monthlyOR contributions
-    let posOR = 0, negOR = 0;
-    for (const li of lineItems) {
-      months.forEach(i => {
-        const v = li.monthlyOR[i] || 0;
-        if (v > 0) posOR += v;
-        if (v < 0) negOR += v;
-      });
-    }
-    displayOpp = -posOR; // express as negative (favorable)
-    displayRisk = -negOR; // express as positive (unfavorable)
-  }
-  const netPosition = displayRisk + displayOpp;
-
-  return {
-    budget: budgetTotal,
-    actual: actualTotal,
-    forecast: forecastTotal,
-    remaining: forecastTotal - actualTotal,
-    risk: displayRisk,
-    opp: displayOpp,
-    net: netPosition,
-    monthlyAC: monthlyACTotal,
-    monthlyFC: monthlyFCTotal,
-  };
-}
-
-window.FilterBar = FilterBar;
-window.filterLineItems = filterLineItems;
-window.aggregate = aggregate;
-window.PERIOD_RANGES = PERIOD_RANGES;
+window.CategoryTab = CategoryTab;

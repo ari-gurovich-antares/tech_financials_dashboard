@@ -1,849 +1,668 @@
-// Parse a 2026 Tech Financials Excel workbook into the same shape as data/financials.json.
-// Uses SheetJS (loaded via <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.full.min.js">)
-//
-// Returns: { summary, vendors, domainOwners, riskOppLog, lineItems, lookups, _rowCount, _excludedCount }
-// or throws an Error with a friendly message.
+// Domain Owner tab + Risk & Opportunity Log tab
+const { useState: useStateD, useMemo: useMemoD } = React;
 
-(function () {
-  // Column header → field. Headers appear in row 0 of "Master Data (DO NOT EDIT)".
-  const HEADERS = {
-    'Transaction Type': 'transactionType',
-    'D365 Legal Vendor name': 'vendor',
-    'DBA / AKA / Passthrough': 'vendorDba',
-    'Project ID': 'projectId',
-    'Project Name': 'project',
-    'Domain': 'domain',
-    'Domain Owner': 'owner',
-    'Application': 'application',
-    'Project Details': 'projectDetails',
-    'Category': 'category',
-    'Sub-Category1': 'subCategory',
-    'Contract Type': 'contractType',
-    'MGMT View Category (OneStream)': 'onestreamCategory',
-    'Accounting Treatment': 'treatment',
-    '2026 Final Budget': 'budget',
-    '2026 (Actuals + Forecast)': 'forecast',
-    '2026 Opportunity': 'opp',
-    '2026 Risk': 'risk',
-    '2026 Net Position': 'net',
-    'Notes': 'notes',
-    'Total Actuals': 'actual',
-    'Non-Comitted': 'nonCommitted',
-  };
+function DomainOwnersTab({ data }) {
+  const [selected, setSelected] = useStateD(null);
+  // Real owners only (drop N/A) for the cards; keep N/A in summary
+  const owners = data.domainOwners
+    .filter(o => o.owner !== 'N/A')
+    .slice()
+    .sort((a,b) => b.budget - a.budget);
+  const totals = data.domainOwners.reduce((acc, o) => ({
+    budget: acc.budget + o.budget, actual: acc.actual + o.actual, forecast: acc.forecast + o.forecast,
+    risk: acc.risk + o.risk, opp: acc.opp + o.opp, net: acc.net + o.net,
+  }), {budget:0,actual:0,forecast:0,risk:0,opp:0,net:0});
 
-  const MONTHS_AC = ['Jan AC','Feb AC','Mar AC','Apr AC','May AC','Jun AC','Jul AC','Aug AC','Sep AC','Oct AC','Nov AC','Dec AC'];
-  const MONTHS_FC = ['Jan FC','Feb FC','Mar FC','Apr FC','May FC','Jun FC','Jul FC','Aug FC','Sep FC','Oct FC','Nov FC','Dec FC'];
-  const MONTHS_OR = ['Jan Opp/Risk','Feb Opp./Risk','Mar Opp./Risk','Apr Opp./Risk','May Opp./Risk','Jun Opp./Risk','Jul Opp./Risk','Aug Opp./Risk','Sep Opp./Risk','Oct Opp./Risk','Nov Opp./Risk','Dec Opp./Risk'];
-  // Some files may have different punctuation; try a tolerant fallback for OR.
-  const MONTHS_OR_ALT = ['Jan Opp./Risk','Feb Opp/Risk','Mar Opp/Risk','Apr Opp/Risk','May Opp/Risk','Jun Opp/Risk','Jul Opp/Risk','Aug Opp/Risk','Sep Opp/Risk','Oct Opp/Risk','Nov Opp/Risk','Dec Opp/Risk'];
+  return (
+    <div>
+      {/* Portfolio summary strip */}
+      <div className="card mb-4">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Domain Owners — Portfolio Health</div>
+            <div className="card-sub">{owners.length} owners managing {fmt.m(totals.budget)} of approved budget · click any card to drill in</div>
+          </div>
+          <div className="flex gap-3 fs-tiny text-stone">
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#333C66',display:'inline-block'}}/>spent</span>
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#6699FF',opacity:0.55,display:'inline-block'}}/>remaining</span>
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#B23A3A',display:'inline-block'}}/>risk</span>
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#2F7A4D',display:'inline-block'}}/>opp</span>
+          </div>
+          <ExportBtn onClick={() => xlsxExport(owners.map(o => ({
+            'Domain Owner': o.owner,
+            'Domains': (o.domains||[]).join('; '),
+            'Vendors': (o.vendors||[]).join('; '),
+            'Budget': o.budget, 'Actuals': o.actual, 'Forecast': o.forecast,
+            'Risk': o.risk, 'Opportunity': o.opp, 'Net': o.net,
+          })), 'Domain Owners')} />
+        </div>
+      </div>
+      <div className="owner-grid">
+        {owners.map(o => {
+          const remaining = o.budget - o.actual;
+          const consumed = o.budget > 0 ? (o.actual/o.budget * 100) : 0;
+          const isOver = consumed > 100;
+          const roTotal = o.risk + Math.abs(o.opp);
+          const riskShare = roTotal > 0 ? (o.risk/roTotal*100) : 0;
+          const oppShare = roTotal > 0 ? (Math.abs(o.opp)/roTotal*100) : 0;
+          return (
+            <button className="owner-card-v2" key={o.owner} onClick={() => setSelected(o)}>
+              <div className="ohead">
+                <div>
+                  <div className="oname">{o.owner}</div>
+                  <div className="orole">{OWNER_ROLES[o.owner] || ''} · {o.vendors.length} vendor{o.vendors.length===1?'':'s'}</div>
+                </div>
+                <div className={`onet ${o.net > 100 ? 'risk' : o.net < -100 ? 'opp' : ''}`}>
+                  <div className="onet-l">Net R/O</div>
+                  <div className="onet-v">{Math.abs(o.net) < 1 ? '$0' : fmt.signed(o.net)}</div>
+                </div>
+              </div>
+              <div className="okpis">
+                <div className="okpi">
+                  <div className="okpi-l">Annual Budget</div>
+                  <div className="okpi-v">{fmt.m2(o.budget)}</div>
+                </div>
+                <div className="okpi">
+                  <div className="okpi-l">YTD Actual</div>
+                  <div className="okpi-v">{fmt.m2(o.actual)}</div>
+                  <div className="okpi-s">{consumed.toFixed(1)}% spent</div>
+                </div>
+                <div className="okpi">
+                  <div className="okpi-l">Remaining Budget</div>
+                  <div className={`okpi-v ${isOver ? 'risk' : ''}`}>{fmt.m2(remaining)}</div>
+                  <div className="okpi-s">{(100-consumed).toFixed(1)}% available</div>
+                </div>
+                <div className="okpi">
+                  <div className="okpi-l">Risk / Opp</div>
+                  <div className="okpi-v" style={{display:'flex', gap:8, alignItems:'baseline', fontSize: 16}}>
+                    <span className="text-risk">{fmt.k(o.risk)}</span>
+                    <span style={{color:'var(--antares-stone-gray)', fontSize:12}}>/</span>
+                    <span className="text-opp">{fmt.k(Math.abs(o.opp))}</span>
+                  </div>
+                </div>
+                <div className="okpi">
+                  <div className="okpi-l">Year-End Forecast</div>
+                  <div className="okpi-v" style={{color: (o.budget + o.net) > o.budget ? 'var(--risk-red)' : 'var(--antares-signature-navy)'}}>{fmt.m2(o.budget + o.net)}</div>
+                  <div className="okpi-s">{fmt.signed(o.net)} vs budget</div>
+                </div>
+              </div>
 
-  const num = (v) => {
-    if (v === null || v === undefined || v === '') return 0;
-    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[, ]/g, ''));
-    return isNaN(n) ? 0 : n;
-  };
-  const str = (v) => v === null || v === undefined ? '' : String(v).trim();
+              {/* Budget consumed bar */}
+              <div className="obar-block">
+                <div className="obar-cap">
+                  <span>Budget Consumption</span>
+                  <span className="tabular">{consumed.toFixed(1)}%</span>
+                </div>
+                <div className="obar">
+                  <div className="obar-spent" style={{width: `${Math.min(consumed,100)}%`}} />
+                  {!isOver && <div className="obar-remain" style={{left: `${consumed}%`, width: `${100-consumed}%`}} />}
+                </div>
+              </div>
 
-  // Returns true when a worksheet cell contains an Excel error (#REF!, #VALUE!,
-  // #N/A, #DIV/0!, etc.).  We must never use error values as financial numbers.
-  function _isErrCell(cell) {
-    if (!cell) return false;
-    if (cell.t === 'e') return true;                         // SheetJS error type
-    const s = String(cell.v == null ? '' : cell.v);
-    return /^#(REF!|VALUE!|NAME\?|NUM!|DIV\/0!|N\/A|NULL!)/.test(s);
+              {/* R&O composition */}
+              {roTotal > 100 && (
+                <div className="obar-block">
+                  <div className="obar-cap">
+                    <span>R&O Exposure</span>
+                    <span className="tabular">{fmt.k(roTotal)}</span>
+                  </div>
+                  <div className="obar ro">
+                    {riskShare > 0 && <div className="obar-risk" style={{width: `${riskShare}%`}} />}
+                    {oppShare > 0 && <div className="obar-opp" style={{width: `${oppShare}%`, left: `${riskShare}%`}} />}
+                  </div>
+                </div>
+              )}
+
+              <div className="ofoot">
+                <span>{o.domains.length} domain{o.domains.length===1?'':'s'}</span>
+                <span className="odrill">View details →</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {selected && <DomainOwnerDrill owner={selected} data={data} onClose={() => setSelected(null)} />}
+
+      {/* Annual Budget vs Year-End Forecast by Domain Owner */}
+      <div className="card mt-4">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Annual Budget vs Year-End Forecast by Domain Owner</div>
+            <div className="card-sub">Sorted by Annual Budget · descending</div>
+          </div>
+          <div className="flex gap-3 fs-tiny text-stone">
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#333C66',display:'inline-block'}}/>annual budget</span>
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#6699FF',display:'inline-block'}}/>year-end forecast</span>
+            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'var(--risk-red)',display:'inline-block'}}/>over budget</span>
+          </div>
+        </div>
+        {(() => {
+          const ownersSorted = owners.slice().sort((a,b) => b.budget - a.budget);
+          const max = Math.max(...ownersSorted.map(o => Math.max(o.budget, o.budget + o.net)), 1);
+          return (
+            <div>
+              {ownersSorted.map(o => {
+                const yef = o.budget + o.net;
+                const bw = (o.budget / max) * 100;
+                const fw = (yef / max) * 100;
+                const over = yef > o.budget;
+                return (
+                  <div key={o.owner} style={{display:'grid', gridTemplateColumns:'200px 1fr 220px', gap:14, alignItems:'center', padding:'10px 0', borderBottom:'1px solid var(--grid-line)', cursor:'pointer'}} onClick={() => setSelected(o)}>
+                    <div>
+                      <div style={{fontWeight:600, color:'var(--antares-signature-navy)', fontSize:13}}>{o.owner}</div>
+                      <div className="fs-tiny text-stone">{OWNER_ROLES[o.owner] || ''}</div>
+                    </div>
+                    <div style={{display:'grid', gridTemplateRows:'1fr 1fr', gap:4}}>
+                      <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
+                        <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${bw}%`, background:'#333C66'}} />
+                        <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)'}}>budget</div>
+                      </div>
+                      <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
+                        <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${fw}%`, background: over ? 'var(--risk-red)' : '#6699FF'}} />
+                        <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)'}}>forecast</div>
+                      </div>
+                    </div>
+                    <div className="text-right tabular fs-small" style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6}}>
+                      <span style={{color:'var(--antares-signature-navy)', fontWeight:600}}>{fmt.k(o.budget)}</span>
+                      <span style={{color: over ? 'var(--risk-red)' : 'var(--antares-bright-blue-600)', fontWeight:600}}>{fmt.k(yef)}</span>
+                      <span style={{color: over ? 'var(--risk-red)' : 'var(--opp-green)', fontWeight:600}}>{fmt.signed(yef - o.budget)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+function DomainOwnerDrill({ owner: o, data, onClose }) {
+  // Filter vendors that belong to this owner
+  const ownerVendors = data.vendors
+    .filter(v => v.domainOwners.includes(o.owner))
+    .sort((a,b) => b.actual - a.actual);
+
+  // Aggregate monthly across all vendors for this owner
+  const monthlyAC = new Array(12).fill(0);
+  const monthlyFC = new Array(12).fill(0);
+  ownerVendors.forEach(v => {
+    v.monthlyAC.forEach((x, i) => monthlyAC[i] += x);
+    v.monthlyFC.forEach((x, i) => monthlyFC[i] += x);
+  });
+
+  // Collect all line items for this owner (across vendors)
+  const allLineItems = [];
+  ownerVendors.forEach(v => {
+    v.lineItems.forEach(li => allLineItems.push({ ...li, vendor: v.vendor }));
+  });
+
+  // Top R&O items
+  const topRO = allLineItems
+    .filter(li => Math.abs(li.net) > 100)
+    .sort((a,b) => Math.abs(b.net) - Math.abs(a.net))
+    .slice(0, 8);
+
+  const remaining = o.budget - o.actual;
+  const consumed = o.budget > 0 ? (o.actual/o.budget * 100) : 0;
+
+  return (
+    <div className="drill-overlay" onClick={onClose}>
+      <div className="drill-panel drill-panel-wide" onClick={e => e.stopPropagation()}>
+        <div className="drill-head">
+          <button className="drill-close" onClick={onClose}>✕ close</button>
+          <div className="ec section-h-sm" style={{textTransform:'uppercase',letterSpacing:'0.12em',fontSize:11,color:'rgba(255,255,255,0.6)',fontWeight:700}}>Domain Owner Drill-Down</div>
+          <h2>{o.owner}</h2>
+          <div className="meta">
+            <span>{OWNER_ROLES[o.owner] || ''}</span>
+            <span>·</span>
+            <span>{ownerVendors.length} vendors</span>
+            <span>·</span>
+            <span>{o.domains.length} domain{o.domains.length===1?'':'s'}</span>
+            <span>·</span>
+            <span>{allLineItems.length} line items</span>
+          </div>
+        </div>
+        <div className="drill-body">
+          <div className="drill-kpi-grid">
+            <div className="drill-kpi"><div className="l">Annual Budget</div><div className="v">{fmt.m2(o.budget)}</div></div>
+            <div className="drill-kpi"><div className="l">YTD Actual Spent</div><div className="v">{fmt.m2(o.actual)}</div><div className="fs-tiny text-stone">{consumed.toFixed(1)}% of budget</div></div>
+            <div className="drill-kpi"><div className="l">Remaining Budget</div><div className="v">{fmt.m2(remaining)}</div></div>
+            <div className="drill-kpi"><div className="l">Net Opp/Risk</div><div className={`v ${o.net > 100 ? 'risk' : o.net < -100 ? 'opp' : ''}`}>{Math.abs(o.net) < 1 ? '—' : fmt.signed2(o.net)}</div></div>
+          </div>
+
+          {/* Domains */}
+          {o.domains.length > 0 && (
+            <div style={{marginBottom: 22}}>
+              <div className="section-h" style={{marginBottom:10}}>Domains Managed</div>
+              <div style={{display:'flex', flexWrap:'wrap', gap: 8}}>
+                {o.domains.map(d => <span key={d} className="chip-static">{d}</span>)}
+              </div>
+            </div>
+          )}
+
+          {/* Vendor breakdown */}
+          <div className="section-h" style={{marginBottom:10}}>Vendors ({ownerVendors.length})</div>
+          <div style={{overflowX:'auto', marginBottom: 22}}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Vendor</th>
+                  <th className="num">Budget</th>
+                  <th className="num">YTD Actual</th>
+                  <th className="num">Forecast</th>
+                  <th className="num">% Spent</th>
+                  <th className="num">Net R/O</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownerVendors.map((v, i) => {
+                  const c = v.budget > 0 ? (v.actual/v.budget*100) : 0;
+                  return (
+                    <tr key={i}>
+                      <td className="vendor-name">{v.vendor}</td>
+                      <td className="num">{fmt.k(v.budget)}</td>
+                      <td className="num">{fmt.k(v.actual)}</td>
+                      <td className="num">{fmt.k(v.forecast)}</td>
+                      <td className="num">{c.toFixed(1)}%</td>
+                      <td className={`num ${v.net > 100 ? 'neg' : v.net < -100 ? 'pos' : 'zero'}`}>{Math.abs(v.net) < 1 ? '—' : fmt.signed(v.net)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Monthly breakdown */}
+          <div className="section-h" style={{marginBottom:10}}>Monthly Breakdown</div>
+          {(() => {
+            const ytdMonths = 3;
+            const totalAC = monthlyAC.reduce((a,b)=>a+b,0);
+            const totalFC = monthlyFC.reduce((a,b)=>a+b,0);
+            return (
+              <div style={{overflowX:'auto', marginBottom: 22}}>
+                <table className="tbl tbl-monthly">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      {MONTHS.map(m => <th key={m} className="num" style={{textAlign:'center', fontWeight:600}}>{m.charAt(0).toUpperCase()+m.slice(1)}</th>)}
+                      <th className="num" style={{fontWeight:600}}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Actuals</td>
+                      {monthlyAC.map((ac, i) => (
+                        <td key={i} className="num" style={{color: ac > 0 ? 'var(--antares-signature-navy)' : 'var(--antares-stone-gray)'}}>{ac > 0 ? fmt.k(ac) : '—'}</td>
+                      ))}
+                      <td className="num" style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>{fmt.k(totalAC)}</td>
+                    </tr>
+                    <tr>
+                      <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Forecast</td>
+                      {monthlyFC.map((fc, i) => (
+                        <td key={i} className="num" style={{color: fc > 0 ? 'var(--antares-bright-blue-600)' : 'var(--antares-stone-gray)'}}>{fc > 0 ? fmt.k(fc) : '—'}</td>
+                      ))}
+                      <td className="num" style={{fontWeight:600, color:'var(--antares-bright-blue-600)'}}>{fmt.k(totalFC)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+
+          {/* Top R&O drivers for this owner */}
+          {topRO.length > 0 && (
+            <>
+              <div className="section-h" style={{marginBottom:10}}>Top Risk & Opportunity Drivers</div>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th style={{width:70}}>Type</th>
+                    <th>Vendor</th>
+                    <th>Application / Item</th>
+                    <th className="num">Net</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topRO.map((it, i) => (
+                    <tr key={i}>
+                      <td>{it.net > 100 ? <span className="badge risk">RISK</span> : <span className="badge opp">OPP</span>}</td>
+                      <td className="vendor-name">{it.vendor}</td>
+                      <td>
+                        <div style={{fontWeight:500}}>{it.application || it.subCategory || it.project}</div>
+                        <div className="fs-tiny text-stone">{it.treatment}</div>
+                      </td>
+                      <td className={`num ${it.net > 100 ? 'neg' : 'pos'}`}>{fmt.signed(it.net)}</td>
+                      <td className="fs-small text-stone" style={{maxWidth:280}}>{(it.notes||'').toString().trim() || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RiskOppLogTab({ data }) {
+  const [tab, setTab] = useStateD('all');
+  const [search, setSearch] = useStateD('');
+  const [drill, setDrill] = useStateD(null);   // 'risks' | 'opps' | 'net' for KPI drill
+  const [rowDrill, setRowDrill] = useStateD(null); // single-row drill
+
+  const items = useMemoD(() => {
+    let v = data.riskOppLog.slice();
+    if (tab === 'risks') v = v.filter(x => x.net > 100);
+    if (tab === 'opps') v = v.filter(x => x.net < -100);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      v = v.filter(x => (x.vendor||'').toLowerCase().includes(q) || (x.notes||'').toLowerCase().includes(q) || (x.application||'').toLowerCase().includes(q));
+    }
+    return v;
+  }, [tab, search, data.riskOppLog]);
+
+  const totalRisk = data.riskOppLog.filter(x => x.net > 100).reduce((s,x)=>s+x.net, 0);
+  const totalOpp = data.riskOppLog.filter(x => x.net < -100).reduce((s,x)=>s+x.net, 0);
+  const riskCount = data.riskOppLog.filter(x => x.net > 100).length;
+  const oppCount = data.riskOppLog.filter(x => x.net < -100).length;
+
+  return (
+    <div>
+      <div className="kpi-grid mb-4" style={{gridTemplateColumns:'repeat(3,1fr)'}}>
+        <button className="kpi risk-tile kpi-clickable" onClick={() => setDrill('risks')}>
+          <div className="kpi-label">total risk exposure</div>
+          <div className="kpi-value risk">{fmt.m(totalRisk)}</div>
+          <div className="kpi-sub">{riskCount} risk items logged · click to drill in →</div>
+        </button>
+        <button className="kpi opp-tile kpi-clickable" onClick={() => setDrill('opps')}>
+          <div className="kpi-label">total opp upside</div>
+          <div className="kpi-value opp">{fmt.m(Math.abs(totalOpp))}</div>
+          <div className="kpi-sub">{oppCount} opportunity items logged · click to drill in →</div>
+        </button>
+        <button className="kpi net-tile kpi-clickable" onClick={() => setDrill('net')}>
+          <div className="kpi-label">net position</div>
+          <div className="kpi-value" style={{color: (totalRisk+totalOpp) > 0 ? 'var(--risk-red)' : (totalRisk+totalOpp) < 0 ? 'var(--opp-green)' : 'inherit'}}>{fmt.signed(totalRisk + totalOpp)}</div>
+          <div className="kpi-sub">{(totalRisk + totalOpp) > 0 ? 'unfavorable' : 'favorable'} to budget · click to drill in →</div>
+        </button>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Risk & Opportunity Log</div>
+            <div className="card-sub">{items.length} items · click any row to view full detail</div>
+          </div>
+          <div className="flex gap-3 items-center">
+            <div className="chips">
+              <button className={`chip ${tab==='all'?'active':''}`} onClick={()=>setTab('all')}>All ({data.riskOppLog.length})</button>
+              <button className={`chip ${tab==='risks'?'active':''}`} onClick={()=>setTab('risks')}>Risks</button>
+              <button className={`chip ${tab==='opps'?'active':''}`} onClick={()=>setTab('opps')}>Opportunities</button>
+            </div>
+            <div className="search-box">
+              <Icon name="search" size={14} color="#807E7A" />
+              <input type="text" placeholder="Search items, notes…" value={search} onChange={e=>setSearch(e.target.value)} />
+            </div>
+          </div>
+          <ExportBtn onClick={() => xlsxExport(items.map(x => ({
+            'Vendor': x.vendor, 'Domain': x.domain, 'Owner': x.owner,
+            'Project': x.project, 'Application': x.application,
+            'Category': x.category, 'Sub-Category': x.subCategory,
+            'Budget': x.budget, 'Forecast': x.forecast,
+            'Risk': x.risk, 'Opportunity': x.opp, 'Net': x.net,
+            'Notes': x.notesRO || x.notes || '',
+          })), `Risk & Opp Log`)} />
+        </div>
+        <div style={{overflowX:'auto'}}>
+          <table className="tbl tbl-clickable">
+            <thead>
+              <tr>
+                <th style={{width:60}}>Type</th>
+                <th>Vendor</th>
+                <th>Application / Item</th>
+                <th>Owner</th>
+                <th className="num">Budget</th>
+                <th className="num">Forecast</th>
+                <th className="num">Net</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => (
+                <tr key={i} onClick={() => setRowDrill(it)}>
+                  <td>
+                    {it.net > 100
+                      ? <span className="badge risk">RISK</span>
+                      : it.net < -100
+                        ? <span className="badge opp">OPP</span>
+                        : <span className="badge neutral">FLAT</span>}
+                  </td>
+                  <td className="vendor-name">{it.vendor || '—'}</td>
+                  <td>
+                    <div style={{fontWeight:500}}>{it.application || it.subCategory || it.project}</div>
+                    <div className="fs-tiny text-stone">{it.treatment}</div>
+                  </td>
+                  <td className="fs-small text-stone">{it.owner === 'N/A' ? '—' : it.owner}</td>
+                  <td className="num">{fmt.k(it.budget)}</td>
+                  <td className="num">{fmt.k(it.forecast)}</td>
+                  <td className={`num ${it.net > 100 ? 'neg' : it.net < -100 ? 'pos' : 'zero'}`}>{Math.abs(it.net) < 1 ? '—' : fmt.signed(it.net)}</td>
+                  <td className="fs-small text-stone" style={{maxWidth:280}}>{it.notes || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {drill && <RiskOppKpiDrill kind={drill} data={data} onClose={() => setDrill(null)} onPickRow={(it)=>{ setDrill(null); setRowDrill(it); }} />}
+      {rowDrill && <RiskOppItemDrill item={rowDrill} onClose={() => setRowDrill(null)} />}
+    </div>
+  );
+}
+
+// KPI tile drill (filtered list of risks / opps / all)
+function RiskOppKpiDrill({ kind, data, onClose, onPickRow }) {
+  const all = data.riskOppLog;
+  let items, title, subtitle, color, total;
+  if (kind === 'risks') {
+    items = all.filter(x => x.net > 100).sort((a,b) => b.net - a.net);
+    title = 'Risk Exposure — Detailed View';
+    subtitle = `${items.length} risk items · downside to budget`;
+    color = 'var(--risk-red)';
+    total = items.reduce((s,x)=>s+x.net,0);
+  } else if (kind === 'opps') {
+    items = all.filter(x => x.net < -100).sort((a,b) => a.net - b.net);
+    title = 'Opportunity Upside — Detailed View';
+    subtitle = `${items.length} opportunity items · favorable to budget`;
+    color = 'var(--opp-green)';
+    total = items.reduce((s,x)=>s+x.net,0);
+  } else {
+    items = all.slice().sort((a,b) => Math.abs(b.net) - Math.abs(a.net));
+    title = 'Net Position — All Items';
+    subtitle = `${items.length} items contributing to the full-year net forecast position`;
+    color = 'var(--antares-signature-navy)';
+    total = items.reduce((s,x)=>s+x.net,0);
   }
 
-  function findHeaderRow(rows) {
-    for (let r = 0; r < Math.min(rows.length, 5); r++) {
-      const row = rows[r] || [];
-      if (row.includes('Transaction Type') && row.includes('D365 Legal Vendor name')) return r;
-    }
-    throw new Error('Could not find header row. Expected a row with "Transaction Type" and "D365 Legal Vendor name".');
-  }
+  // Group by owner
+  const byOwner = {};
+  items.forEach(it => {
+    const o = it.owner === 'N/A' ? 'Unallocated' : (it.owner || 'Unallocated');
+    if (!byOwner[o]) byOwner[o] = { owner: o, count: 0, total: 0 };
+    byOwner[o].count += 1;
+    byOwner[o].total += it.net;
+  });
+  const ownerRows = Object.values(byOwner).sort((a,b) => Math.abs(b.total) - Math.abs(a.total));
 
-  function buildColIndex(headerRow) {
-    const idx = {};
-    headerRow.forEach((h, i) => {
-      const key = str(h);
-      if (key) idx[key] = i;
-    });
-    return idx;
-  }
+  return (
+    <div className="drill-overlay" onClick={onClose}>
+      <div className="drill-panel drill-panel-wide" onClick={e => e.stopPropagation()}>
+        <div className="drill-head">
+          <button className="drill-close" onClick={onClose}>✕ close</button>
+          <div className="ec section-h-sm" style={{textTransform:'uppercase',letterSpacing:'0.12em',fontSize:11,color:'rgba(255,255,255,0.6)',fontWeight:700}}>
+            {kind === 'risks' ? 'Risk Drill-Down' : kind === 'opps' ? 'Opportunity Drill-Down' : 'Net Position Drill-Down'}
+          </div>
+          <h2>{title}</h2>
+          <div className="meta"><span>{subtitle}</span><span>·</span><span style={{fontVariantNumeric:'tabular-nums'}}>Total: {fmt.signed2(total)}</span></div>
+        </div>
+        <div className="drill-body">
+          {/* By Owner summary */}
+          <div className="section-h" style={{marginBottom:10}}>By Domain Owner</div>
+          <div style={{overflowX:'auto', marginBottom: 22}}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Owner</th>
+                  <th className="num">Items</th>
+                  <th className="num">Net Impact</th>
+                  <th>Distribution</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownerRows.map((r, i) => {
+                  const max = Math.max(...ownerRows.map(x => Math.abs(x.total)), 1);
+                  const w = Math.abs(r.total)/max*100;
+                  return (
+                    <tr key={i}>
+                      <td className="vendor-name">{r.owner}</td>
+                      <td className="num">{r.count}</td>
+                      <td className={`num ${r.total > 0 ? 'neg' : 'pos'}`} style={{fontVariantNumeric:'tabular-nums'}}>{fmt.signed(r.total)}</td>
+                      <td>
+                        <div style={{height:8, background:'#F5F4F1', position:'relative', width:'100%', maxWidth:240}}>
+                          <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${w}%`, background: r.total > 0 ? 'var(--risk-red)' : 'var(--opp-green)'}} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-  function readArr(row, colIdx, names) {
-    const out = new Array(12).fill(0);
-    for (let i = 0; i < 12; i++) {
-      const ci = colIdx[names[i]];
-      if (ci != null) out[i] = num(row[ci]);
-    }
-    return out;
-  }
+          {/* Item list */}
+          <div className="section-h" style={{marginBottom:10}}>All Items ({items.length})</div>
+          <table className="tbl tbl-clickable">
+            <thead>
+              <tr>
+                <th style={{width:50}}></th>
+                <th>Vendor</th>
+                <th>Application / Item</th>
+                <th>Owner</th>
+                <th className="num">Net</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => (
+                <tr key={i} onClick={() => onPickRow(it)}>
+                  <td>
+                    {it.net > 0
+                      ? <span className="badge risk">RISK</span>
+                      : <span className="badge opp">OPP</span>}
+                  </td>
+                  <td className="vendor-name">{it.vendor || '—'}</td>
+                  <td>
+                    <div style={{fontWeight:500}}>{it.application || it.subCategory || it.project}</div>
+                    <div className="fs-tiny text-stone">{it.treatment}</div>
+                  </td>
+                  <td className="fs-small text-stone">{it.owner === 'N/A' ? '—' : it.owner}</td>
+                  <td className={`num ${it.net > 0 ? 'neg' : 'pos'}`}>{fmt.signed(it.net)}</td>
+                  <td className="fs-small text-stone" style={{maxWidth:300}}>{it.notes || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  function parseExcelArrayBuffer(arrayBuffer) {
-    if (typeof XLSX === 'undefined') {
-      throw new Error('SheetJS (XLSX) library not loaded. Check <script> tag.');
-    }
-    const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array', cellFormula: true });
-    let sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('master data'));
-    if (!sheetName) {
-      throw new Error(
-        `Sheet "Master Data (DO NOT EDIT)" not found. Found sheets: ${wb.SheetNames.join(', ')}`
-      );
-    }
-    const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
-    if (!rows.length) throw new Error('Master Data sheet is empty.');
+// Single-item drill — full detail
+function RiskOppItemDrill({ item: it, onClose }) {
+  const isRisk = it.net > 100;
+  const isOpp = it.net < -100;
+  return (
+    <div className="drill-overlay" onClick={onClose}>
+      <div className="drill-panel" onClick={e => e.stopPropagation()}>
+        <div className="drill-head" style={{background: isRisk ? '#7A1E1E' : isOpp ? '#1E5A37' : 'var(--antares-signature-navy)'}}>
+          <button className="drill-close" onClick={onClose}>✕ close</button>
+          <div className="ec section-h-sm" style={{textTransform:'uppercase',letterSpacing:'0.12em',fontSize:11,color:'rgba(255,255,255,0.7)',fontWeight:700}}>
+            {isRisk ? 'Risk Item' : isOpp ? 'Opportunity Item' : 'R&O Item'}
+          </div>
+          <h2>{it.application || it.subCategory || it.project || '—'}</h2>
+          <div className="meta">
+            <span>{it.vendor || '—'}</span>
+            <span>·</span>
+            <span>{it.owner === 'N/A' ? 'Unallocated' : (it.owner || 'Unallocated')}</span>
+            <span>·</span>
+            <span>{it.domain || '—'}</span>
+          </div>
+        </div>
+        <div className="drill-body">
+          <div className="drill-kpi-grid">
+            <div className="drill-kpi"><div className="l">Budget</div><div className="v">{fmt.m2(it.budget)}</div></div>
+            <div className="drill-kpi"><div className="l">YTD Actual</div><div className="v">{fmt.m2(it.actual)}</div></div>
+            <div className="drill-kpi"><div className="l">Forecast</div><div className="v">{fmt.m2(it.forecast)}</div></div>
+            <div className="drill-kpi">
+              <div className="l">Net Opp/Risk</div>
+              <div className={`v ${isRisk ? 'risk' : isOpp ? 'opp' : ''}`}>{Math.abs(it.net) < 1 ? '—' : fmt.signed2(it.net)}</div>
+            </div>
+          </div>
 
-    const headerRowIdx = findHeaderRow(rows);
-    const colIdx = buildColIndex(rows[headerRowIdx]);
+          <div className="section-h" style={{marginBottom:10}}>Classification</div>
+          <table className="tbl" style={{marginBottom:22}}>
+            <tbody>
+              <tr><td style={{width:'30%', fontWeight:600, color:'var(--antares-signature-navy)'}}>Vendor</td><td>{it.vendor || '—'}</td></tr>
+              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Project</td><td>{it.project || '—'}</td></tr>
+              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Application</td><td>{it.application || '—'}</td></tr>
+              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Domain</td><td>{it.domain || '—'}</td></tr>
+              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Domain Owner</td><td>{it.owner === 'N/A' ? 'Unallocated' : (it.owner || '—')}</td></tr>
+              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Category</td><td>{it.category || '—'}</td></tr>
+              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Sub-Category</td><td>{it.subCategory || '—'}</td></tr>
+              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Accounting Treatment</td><td>{it.treatment || '—'}</td></tr>
+            </tbody>
+          </table>
 
-    // ── Robust Non-Committed column detection ─────────────────────────────
-    // Normalize: lowercase + strip ALL whitespace, hyphens, underscores, punctuation.
-    // Handles: Non-Comitted, Non-Committed, Non Comitted, noncommitted, etc.
-    const _normHdr = h => String(h || '').toLowerCase().replace(/[\s\-_.,;:'"()\\/]+/g, '');
-    const _NC_NORMS = new Set(['noncomitted', 'noncommitted', 'noncomited', 'noncommited']);
-    // First try exact HEADERS-map key, then fuzzy scan.
-    let _ncColIdx = (colIdx['Non-Comitted'] != null) ? colIdx['Non-Comitted'] : null;
-    let _ncRawHdr = _ncColIdx != null ? 'Non-Comitted' : null;
-    if (_ncColIdx == null) {
-      for (const [hdr, ci] of Object.entries(colIdx)) {
-        if (_NC_NORMS.has(_normHdr(hdr))) { _ncColIdx = ci; _ncRawHdr = hdr; break; }
-      }
-    }
-    console.log('[parse] Non-Committed column detected: "' + (_ncRawHdr || 'NOT FOUND') + '" → col index ' + _ncColIdx);
+          <div className="section-h" style={{marginBottom:10}}>Variance Analysis</div>
+          <table className="tbl" style={{marginBottom: 22}}>
+            <tbody>
+              <tr>
+                <td style={{width:'30%', fontWeight:600, color:'var(--antares-signature-navy)'}}>Risk Component</td>
+                <td className="num neg" style={{textAlign:'left'}}>{Math.abs(it.risk||0) < 1 ? '$0' : fmt.k(it.risk)}</td>
+              </tr>
+              <tr>
+                <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Opportunity Component</td>
+                <td className="num pos" style={{textAlign:'left'}}>{Math.abs(it.opp||0) < 1 ? '$0' : fmt.k(Math.abs(it.opp))}</td>
+              </tr>
+              <tr style={{borderTop:'2px solid var(--antares-signature-navy)'}}>
+                <td style={{fontWeight:700, color:'var(--antares-signature-navy)'}}>Net Position</td>
+                <td className={`num ${isRisk ? 'neg' : isOpp ? 'pos' : 'zero'}`} style={{textAlign:'left', fontWeight:700}}>{Math.abs(it.net) < 1 ? '—' : fmt.signed(it.net)}</td>
+              </tr>
+              <tr>
+                <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Forecast vs Budget</td>
+                <td style={{textAlign:'left'}}>{fmt.signed(it.forecast - it.budget)} ({((it.forecast-it.budget)/it.budget*100).toFixed(2)}%)</td>
+              </tr>
+            </tbody>
+          </table>
 
-    // Sanity: required columns
-    const required = ['Transaction Type', 'D365 Legal Vendor name', '2026 Final Budget', 'Total Actuals'];
-    const missing = required.filter(h => !(h in colIdx));
-    if (missing.length) throw new Error(`Missing columns in Master Data: ${missing.join(', ')}`);
+          {it.notes && (
+            <>
+              <div className="section-h" style={{marginBottom:10}}>Notes</div>
+              <div className="fs-small" style={{padding:'12px 14px', background:'#FAFAF8', borderLeft:'3px solid ' + (isRisk ? 'var(--risk-red)' : isOpp ? 'var(--opp-green)' : 'var(--antares-bright-blue)'), color:'var(--antares-soft-black)', lineHeight: 1.5}}>
+                {it.notes}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-    // Resolve OR header set — some files use one variant, some the other. Build a tolerant resolver.
-    const resolvedOR = MONTHS_OR.map((m, i) => {
-      if (m in colIdx) return m;
-      if (MONTHS_OR_ALT[i] in colIdx) return MONTHS_OR_ALT[i];
-      // Last-ditch: find any header starting with month abbrev + "Opp"
-      const abbrev = m.slice(0, 3);
-      const found = Object.keys(colIdx).find(k => k.startsWith(abbrev) && /Opp/.test(k));
-      return found || m; // may end up missing → array will have 0
-    });
-
-    // ════════════════════════════════════════════════════════════════════════
-    // ROW INCLUSION RULE
-    // ════════════════════════════════════════════════════════════════════════
-    //
-    // The dashboard dataset is scoped to exactly the same rows as the
-    // workbook SUBTOTAL formula found in the Master Data sheet.
-    //
-    // How it works (automatic, no hardcoded row numbers):
-    //
-    //   1. Pre-scan: locate the SUBTOTAL summary row (identified by having no
-    //      Transaction Type, no Category, and no Sub-Category).
-    //
-    //   2. Read the formula stored in its Budget cell, e.g.:
-    //        =SUBTOTAL(9, V2:V140)
-    //      Extract the upper bound of the range (140 in this example).
-    //
-    //   3. Restrict all data processing to Excel rows within that range.
-    //      Any row whose Excel row number exceeds the upper bound is excluded.
-    //
-    //   4. Read the SUBTOTAL cell values as the authoritative KPI totals
-    //      (stored as workbookSubtotal). These are used directly for all
-    //      headline KPI cards when no filters are active, guaranteeing that
-    //      Dashboard values = Workbook SUBTOTAL values.
-    //
-    // Why this matters:
-    //   The workbook may contain rows AFTER the SUBTOTAL formula range
-    //   (e.g. adjustment rows, draft entries, reconciling items) that the
-    //   Finance team intentionally excluded from reporting. By scoping to
-    //   the formula range, the dashboard automatically mirrors the same
-    //   boundary the analyst set in the workbook.
-    //
-    // If the workbook changes:
-    //   • Rows added WITHIN the formula range (e.g. V2:V141) → included.
-    //   • SUBTOTAL formula range extended (e.g. V2:V155) → dashboard extends.
-    //   • SUBTOTAL formula range shrunk → dashboard shrinks.
-    //   No code change required.
-    //
-    // Fallback (if formula string is unavailable):
-    //   Accumulate the budget column row-by-row until the running total
-    //   matches workbookSubtotal.budget (within $1). The row where the match
-    //   occurs is used as the upper bound. This handles cases where the
-    //   Excel file stores only the computed value, not the formula string.
-    // ════════════════════════════════════════════════════════════════════════
-
-    // subtotalRangeEnd: the last Excel row number covered by the SUBTOTAL formula.
-    // null means no SUBTOTAL row was found; all rows will be processed.
-    let subtotalRangeEnd = null;
-    let workbookSubtotal = null;  // Authoritative KPI values from the SUBTOTAL row
-
-    // subtotalRowIdx: SheetJS row index of the SUBTOTAL row.
-    // Used in Step 3 to avoid double-counting the SUBTOTAL row's formula value.
-    let subtotalRowIdx = -1;
-
-    // ── STEP 1: Pre-scan — locate SUBTOTAL row and read its formula ──────
-    for (let ps = headerRowIdx + 1; ps < rows.length; ps++) {
-      const psRow = rows[ps];
-      if (!psRow || psRow.every(v => v === null || v === '' || v === undefined)) continue;
-
-      const psTx  = str(psRow[colIdx['Transaction Type']]);
-      const psCat = str(psRow[colIdx['Category']]);
-      const psSub = str(psRow[colIdx['Sub-Category1']]);
-
-      // SUBTOTAL row has no Transaction Type, no Category, and no Sub-Category
-      if (!psTx && !psCat && !psSub) {
-
-        subtotalRowIdx = ps; // Save for main loop exclusion guard
-
-        // ── Capture authoritative KPI totals from the SUBTOTAL row ──────
-        workbookSubtotal = {
-          budget:   num(psRow[colIdx['2026 Final Budget']]),
-          forecast: num(psRow[colIdx['2026 (Actuals + Forecast)']]),
-          actual:   num(psRow[colIdx['Total Actuals']]),
-          risk:     num(psRow[colIdx['2026 Risk']]),
-          opp:      num(psRow[colIdx['2026 Opportunity']]),
-          net:      num(psRow[colIdx['2026 Net Position']]),
-        };
-        workbookSubtotal.absOpp    = Math.abs(workbookSubtotal.opp);
-        workbookSubtotal.remaining = workbookSubtotal.forecast - workbookSubtotal.actual;
-
-        // ── Extract formula range end from the SUBTOTAL cell ────────────
-        // The Budget column cell should contain e.g. =SUBTOTAL(9,V2:V140).
-        // We parse the upper-bound row number from that formula string.
-        const budCellAddr = XLSX.utils.encode_cell({ r: ps, c: colIdx['2026 Final Budget'] });
-        const budCell     = ws[budCellAddr];
-        if (budCell && budCell.f) {
-          // Detect SUBTOTAL(9,...) — function_num 9 excludes rows hidden by filter.
-          // If the workbook was saved with an AutoFilter active the cached value
-          // reflects only the VISIBLE rows, NOT the grand total.  We detect this
-          // by checking for the SUBTOTAL keyword; when found we skip the cached
-          // value as the authoritative KPI source and rely on the lineItems sum.
-          const isFilteredSubtotal = /^\s*SUBTOTAL\s*\(\s*(9|109)\s*,/i.test(budCell.f);
-          if (isFilteredSubtotal) {
-            console.warn('[parse] SUBTOTAL(9/109,...) detected at R' + (ps+1) +
-              ' — workbook likely saved with AutoFilter active.' +
-              ' Cached value ($' + Math.round(workbookSubtotal.budget/1000) + 'K) reflects filtered rows only.' +
-              ' Falling back to lineItems aggregation for all KPI cards.' +
-              ' To fix: open workbook → Data → Refresh All → save → re-upload.');
-            workbookSubtotal = null; // will be replaced by lineItems sum below
-          } else {
-            // Match the end of a range reference like ":V140)" or ":AB140,"
-            const rangeMatch = budCell.f.match(/:[A-Z]+(\d+)\s*[),]/);
-            if (rangeMatch) {
-              subtotalRangeEnd = parseInt(rangeMatch[1], 10);
-            }
-          }
-        }
-
-        break; // Only the first SUBTOTAL row is used
-      }
-    }
-
-    // ── STEP 2: Fallback — derive range end via budget-sum matching ──────
-    // Used when the XLSX file stores only computed values, not formula strings.
-    // Skip if a filtered SUBTOTAL was already detected (workbookSubtotal = null).
-    if (!subtotalRangeEnd && workbookSubtotal) {
-      const targetBudget = workbookSubtotal.budget; // = SUM of all rows in SUBTOTAL range
-      let cumBudget = 0;
-      for (let ri = headerRowIdx + 1; ri < rows.length; ri++) {
-        const rrow = rows[ri];
-        if (!rrow || rrow.every(v => v === null || v === '')) continue;
-        const rtx  = str(rrow[colIdx['Transaction Type']]);
-        const rcat = str(rrow[colIdx['Category']]);
-        const rsub = str(rrow[colIdx['Sub-Category1']]);
-        if (!rtx && !rcat && !rsub) break; // Reached SUBTOTAL row — stop
-        cumBudget += num(rrow[colIdx['2026 Final Budget']]);
-        // When the running total matches the SUBTOTAL budget (within $1 for float rounding),
-        // the current row is the last row in the SUBTOTAL range.
-        if (Math.abs(cumBudget - targetBudget) < 1) {
-          subtotalRangeEnd = ri + 1; // Convert 0-based SheetJS index to 1-based Excel row
-          break;
-        }
-      }
-    }
-
-    // ── Formula-derived field detection (pre-STEP 3) ────────────────────────
-    // Sample up to 8 data rows to determine whether Risk, Opp, Net are formula-
-    // derived from Budget and Forecast.  When a cell carries a formula, the
-    // parser re-derives its value in JS instead of trusting the cached result.
-    // This avoids stale values when the workbook was saved with manual calc mode.
-    //
-    // Standard derivation (confirmed from workbook IF formulas):
-    //   net         = forecast − budget
-    //   risk        = net > 0 ? net : 0    (unfavorable overspend)
-    //   opportunity = net < 0 ? net : 0    (favorable underspend)
-    const _riskCI = colIdx['2026 Risk'];
-    const _oppCI  = colIdx['2026 Opportunity'];
-    const _netCI  = colIdx['2026 Net Position'];
-    let _riskFml = false, _oppFml = false, _netFml = false, _fmlSampled = 0;
-    for (let _sr = headerRowIdx + 1; _sr < rows.length && _fmlSampled < 8; _sr++) {
-      const _srow = rows[_sr];
-      if (!_srow || _srow.every(v => v === null || v === '' || v === undefined)) continue;
-      if (Math.abs(num(_srow[colIdx['2026 Final Budget']])) < 100) continue;
-      if (_riskCI != null && !_riskFml) { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _riskCI })]; if (_c && _c.f) _riskFml = true; }
-      if (_oppCI  != null && !_oppFml)  { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _oppCI  })]; if (_c && _c.f) _oppFml  = true; }
-      if (_netCI  != null && !_netFml)  { const _c = ws[XLSX.utils.encode_cell({ r: _sr, c: _netCI  })]; if (_c && _c.f) _netFml  = true; }
-      _fmlSampled++;
-    }
-    console.log('[parse] Risk/Opp/Net formula detection (' + _fmlSampled + ' rows sampled):',
-      { riskFormula: _riskFml, oppFormula: _oppFml, netFormula: _netFml });
-
-    // ── STEP 3: Main data loop — process only rows within the SUBTOTAL range ─
-    const lineItems = [];
-    let rowCount = 0;
-    let excludedCount = 0;
-    // Track totals for ALL rows excluded within the SUBTOTAL range (any exclusion
-    // reason: Capitalization type, no vendor/project, summary rows).
-    // This covers every path that removes a row from lineItems but leaves it in the
-    // SUBTOTAL formula — regardless of which field or rule triggered the exclusion.
-    // NOTE: the SUBTOTAL row itself (subtotalRowIdx) is always skipped.
-    let exclBudget = 0, exclForecast = 0, exclActual = 0, exclRisk = 0, exclOpp = 0, exclNet = 0;
-    // ── Error / recompute tracking ───────────────────────────────────────
-    let _errCellCount = 0;          // cells that contained an Excel error value
-    let _netRecompCount = 0;        // rows where Net was recomputed from FC−Bud
-    const _netRecompSample = [];    // up to 5 sample rows for console logging
-    const capRowLog = []; // diagnostic: rows excluded as Capitalization
-    for (let r = headerRowIdx + 1; r < rows.length; r++) {
-
-      // Convert SheetJS 0-based row index to 1-based Excel row number
-      const excelRowNum = r + 1;
-
-      // ── ROW INCLUSION GATE ──────────────────────────────────────────────
-      // If a SUBTOTAL range was found, skip any row beyond its upper bound.
-      // This ensures the dataset matches the SUBTOTAL formula range exactly.
-      // Example: if subtotalRangeEnd = 140, rows 141+ are excluded.
-      if (subtotalRangeEnd && excelRowNum > subtotalRangeEnd) {
-        excludedCount++;
-        continue;
-      }
-      const row = rows[r];
-      if (!row || row.every(v => v === null || v === '' || v === undefined)) continue;
-
-      // Build base record
-      const rec = {};
-      for (const [hdr, fld] of Object.entries(HEADERS)) {
-        const ci = colIdx[hdr];
-        rec[fld] = ci != null ? row[ci] : null;
-      }
-
-      const tx = str(rec.transactionType);
-      // Pre-read financial values — used for exclusion tracking and lineItem building.
-      // Inlined at each exclusion path (no helper function — avoids Babel hoisting issues
-      // with function declarations inside for-loop blocks).
-      const _rB = num(rec.budget), _rF = num(rec.forecast), _rA = num(rec.actual),
-            _rR = num(rec.risk),   _rO = num(rec.opp),      _rN = num(rec.net);
-      // ── Exclusion path A: Capitalization transaction type ─────────────
-      if (tx.toLowerCase() === 'capitalization') {
-        if (r !== subtotalRowIdx) {
-          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
-          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
-        }
-        capRowLog.push({ excelRow: excelRowNum, budget:_rB, forecast:_rF, actual:_rA, risk:_rR, opp:_rO, net:_rN, reason:'cap-tx' });
-        excludedCount++;
-        continue;
-      }
-      // ── Exclusion path B: no vendor AND no project ────────────────────
-      if (!str(rec.vendor) && !str(rec.project)) {
-        if (r !== subtotalRowIdx) {
-          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
-          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
-        }
-        capRowLog.push({ excelRow: excelRowNum, budget:_rB, forecast:_rF, actual:_rA, risk:_rR, opp:_rO, net:_rN, reason:'no-vendor-project', tx });
-        continue;
-      }
-      // ── Exclusion path C: summary/subtotal rows (no tx, no cat, no subcat) ──
-      const recCat    = str(rec.category);
-      const recSubCat = str(rec.subCategory);
-      if (!tx && !recCat && !recSubCat) {
-        if (r !== subtotalRowIdx) {
-          exclBudget += _rB; exclForecast += _rF; exclActual += _rA;
-          exclRisk   += _rR; exclOpp      += _rO; exclNet    += _rN;
-        }
-        excludedCount++;
-        continue;
-      }
-
-      // ── Error-safe risk/opp/net ───────────────────────────────────────────
-      // Recompute when a cell: (a) is an Excel error, OR
-      //                        (b) is formula-driven (per column-level detection)
-      //                            AND carries a formula on this specific cell.
-      // Hardcoded plain-number overrides are always preserved.
-      const _liBud = num(rec.budget);
-      const _liFc  = num(rec.forecast);
-      const _liN   = _liFc - _liBud;
-
-      const _rCell = _riskCI != null ? ws[XLSX.utils.encode_cell({ r, c: _riskCI })] : null;
-      const _oCell = _oppCI  != null ? ws[XLSX.utils.encode_cell({ r, c: _oppCI  })] : null;
-      const _nCell = _netCI  != null ? ws[XLSX.utils.encode_cell({ r, c: _netCI  })] : null;
-
-      if (_isErrCell(_rCell)) _errCellCount++;
-      if (_isErrCell(_oCell)) _errCellCount++;
-      if (_isErrCell(_nCell)) _errCellCount++;
-
-      const _recompRisk = _isErrCell(_rCell) || (_riskFml && _rCell && _rCell.f);
-      const _recompOpp  = _isErrCell(_oCell) || (_oppFml  && _oCell && _oCell.f);
-      const _recompNet  = _isErrCell(_nCell) || (_netFml  && _nCell && _nCell.f);
-
-      let _liRisk = _recompRisk ? (_liN > 0 ? _liN : 0) : num(rec.risk);
-      let _liOpp  = _recompOpp  ? (_liN < 0 ? _liN : 0) : num(rec.opp);
-      let _liNet  = _recompNet  ? _liN                  : num(rec.net);
-
-      if (_recompNet) {
-        _netRecompCount++;
-        if (_netRecompSample.length < 5) {
-          _netRecompSample.push({
-            row: r + 1,
-            vendor: str(rec.vendor) || '(unknown)',
-            budget: _liBud, forecast: _liFc,
-            storedNet: _nCell ? _nCell.v : null,
-            netErr: _isErrCell(_nCell),
-            computedNet: _liN,
-          });
-        }
-      }
-
-      const lineItem = {
-        vendor: str(rec.vendor) || '',
-        domain: str(rec.domain) || '',
-        owner: str(rec.owner) || 'N/A',
-        category: str(rec.category) || '',
-        project: str(rec.project) || '',
-        application: str(rec.application) || '',
-        subCategory: str(rec.subCategory) || '',
-        treatment: str(rec.treatment) || '',
-        budget: _liBud,
-        actual: num(rec.actual),
-        forecast: _liFc,
-        risk: _liRisk,
-        opp: _liOpp,
-        net: _liNet,
-        notes: str(rec.notes) || '',
-        notesRO: '',
-        monthlyAC: readArr(row, colIdx, MONTHS_AC),
-        monthlyFC: readArr(row, colIdx, MONTHS_FC),
-        monthlyOR: readArr(row, colIdx, resolvedOR),
-        onestreamCategory: str(rec.onestreamCategory) || '',
-        // Use robust-detected column index directly (bypasses exact HEADERS spelling)
-        nonCommitted: _ncColIdx != null ? str(row[_ncColIdx]) : '',
-      };
-      lineItems.push(lineItem);
-      rowCount++;
-    }
-
-    // ── Notes - R&O sheet: build lookup and attach to line items ──────────
-    const roSheetName = wb.SheetNames.find(n => /notes.*r.?o/i.test(n) || /r.?o.*notes/i.test(n));
-    // vendorCatNotes: vendor → [{category, note}] ordered as in the Notes sheet
-    const vendorCatNotes = new Map();
-
-    if (roSheetName) {
-      try {
-        const roWs   = wb.Sheets[roSheetName];
-        const roRows = XLSX.utils.sheet_to_json(roWs, { header: 1, defval: null, raw: false });
-
-        // Detect header row to find optional category column
-        const hdr = (roRows[0] || []).map(h => str(h).toLowerCase());
-        const catColIdx = hdr.findIndex(h => h.includes('category') || h === 'cat');
-        console.log('[parse] Notes - R&O header cols:', hdr.slice(0, 12), '→ category col idx:', catColIdx);
-
-        const roMapVC = new Map(); // vendor|category → note  (preferred)
-        const roMapV  = new Map(); // vendor → note           (fallback)
-
-        for (let ri = 1; ri < roRows.length; ri++) {
-          const r      = roRows[ri] || [];
-          const owner  = str(r[1]);
-          const vendor = str(r[2]);
-          const cat    = catColIdx >= 0 ? str(r[catColIdx]) : '';
-          const notes  = str(r[8]);
-          if (!vendor || !notes) continue;
-          if (/total$/i.test(owner) || /^values$/i.test(owner)) continue;
-          if (/^(dark|light)\s+(green|red)/i.test(notes)) continue;
-          const k1 = vendor.toLowerCase();
-          if (!roMapV.has(k1)) roMapV.set(k1, notes);
-          if (cat) {
-            roMapVC.set(`${k1}|${cat.toLowerCase()}`, notes);
-            // Build per-vendor category list (preserves Notes sheet order)
-            if (!vendorCatNotes.has(k1)) vendorCatNotes.set(k1, []);
-            const vcList = vendorCatNotes.get(k1);
-            if (!vcList.find(x => x.category.toLowerCase() === cat.toLowerCase())) {
-              vcList.push({ category: cat, note: notes });
-            }
-          }
-        }
-        for (const li of lineItems) {
-          const k1  = li.vendor.toLowerCase();
-          const vcList = vendorCatNotes.get(k1);
-          // Try to find the Notes spend category that best matches this line item
-          let matchedCat = null;
-          if (vcList && vcList.length) {
-            const sub   = (li.subCategory   || '').toLowerCase().replace(/[^\w]/g, '');
-            const cont  = (li.contractType  || '').toLowerCase().replace(/[^\w]/g, '');
-            const isLabor = (li.category || '').toLowerCase() === 'labor';
-            for (const { category: nc } of vcList) {
-              const ncN = nc.toLowerCase().replace(/[^\w]/g, '');
-              if (sub  && (ncN === sub  || ncN.includes(sub)  || sub.includes(ncN)))  { matchedCat = nc; break; }
-              if (cont && (ncN === cont || ncN.includes(cont) || cont.includes(ncN))) { matchedCat = nc; break; }
-              if (isLabor && (ncN.includes('labor') || ncN.includes('tm') || ncN.includes('t&m'))) { matchedCat = nc; break; }
-            }
-          }
-          li.spendCategory = matchedCat || li.subCategory || li.category;
-          li.notesRO = (matchedCat && roMapVC.get(`${k1}|${matchedCat.toLowerCase()}`)) || roMapV.get(k1) || '';
-        }
-        console.log('[parse] Notes - R&O:', roMapVC.size, 'category-level +', roMapV.size, 'vendor-level entries');
-      } catch(e) {
-        console.warn('[parse] Notes - R&O parse failed:', e.message);
-      }
-    }
-
-    // ── Error / recompute summary ─────────────────────────────────────────
-    console.log('[parse] Excel error cells found in Risk/Opp/Net columns: ' + _errCellCount);
-    console.log('[parse] Rows where Net was recomputed from Forecast−Budget: ' + _netRecompCount);
-    if (_netRecompSample.length) {
-      console.log('[parse] Net recompute sample rows:', _netRecompSample.map(s =>
-        'R' + s.row + ' ' + s.vendor.slice(0,24) +
-        ' | bud=$' + Math.round(s.budget/1000) + 'K fc=$' + Math.round(s.forecast/1000) + 'K' +
-        ' | stored=' + (s.netErr ? '#ERR' : '$'+Math.round((s.storedNet||0)/1000)+'K') +
-        ' → computed=$' + Math.round(s.computedNet/1000) + 'K'
-      ));
-    }
-
-    // ── When filtered SUBTOTAL was detected (workbookSubtotal=null), build from lineItems ──
-    // Mark as lineItems-sourced so the cap-exclusion block below can skip it
-    // (lineItems already exclude Capitalization rows — no double-subtraction).
-    let _wbsFromLineItems = false;
-    if (!workbookSubtotal && lineItems.length) {
-      let _lb=0,_lf=0,_la=0,_lr=0,_lo=0,_ln=0;
-      for (const li of lineItems) { _lb+=li.budget||0; _lf+=li.forecast||0; _la+=li.actual||0; _lr+=li.risk||0; _lo+=li.opp||0; _ln+=li.net||0; }
-      workbookSubtotal = { budget:_lb, forecast:_lf, actual:_la, remaining:_lf-_la, risk:_lr, opp:_lo, net:_ln, absOpp:Math.abs(_lo) };
-      _wbsFromLineItems = true;
-      console.log('[parse] KPI from lineItems (filtered-SUBTOTAL path): budget=$'+Math.round(_lb/1e3)+'K forecast=$'+Math.round(_lf/1e3)+'K risk=$'+Math.round(_lr/1e3)+'K');
-    }
-
-    // ── Adjust workbookSubtotal to exclude Capitalization rows ─────────────
-    // Cap exclusion accounting complete — adjustment applied conditionally below
-    // Adjust workbookSubtotal only when it differs from lineItems sums.
-    //
-    // Two cases handled:
-    //  a) Workbook saved WITH filter ON:  SUBTOTAL cached value already excludes Cap →
-    //     raw SUBTOTAL == lineItems sum → no adjustment needed, reconciliation passes.
-    //  b) Workbook saved WITHOUT filter:  SUBTOTAL includes Cap row amounts →
-    //     raw SUBTOTAL != lineItems sum → subtract excluded amounts to align them.
-    //
-    // Without this guard, subtracting a negative Cap budget (credit entry) would
-    // ADD to the SUBTOTAL instead of reducing it, breaking reconciliation.
-    if (workbookSubtotal) {
-      let _lb = 0, _lf = 0, _la = 0;
-      for (const li of lineItems) { _lb += li.budget||0; _lf += li.forecast||0; _la += li.actual||0; }
-      const _rawBudget = workbookSubtotal.budget;
-      const needsAdj = Math.abs(workbookSubtotal.budget   - _lb) > 1 ||
-                       Math.abs(workbookSubtotal.forecast - _lf) > 1 ||
-                       Math.abs(workbookSubtotal.actual   - _la) > 1;
-      if (needsAdj) {
-        const adjForecast = workbookSubtotal.forecast - exclForecast;
-        const adjActual   = workbookSubtotal.actual   - exclActual;
-        workbookSubtotal = {
-          budget:    workbookSubtotal.budget   - exclBudget,
-          forecast:  adjForecast,
-          actual:    adjActual,
-          remaining: adjForecast - adjActual,
-          risk:      workbookSubtotal.risk     - exclRisk,
-          opp:       workbookSubtotal.opp      - exclOpp,
-          net:       workbookSubtotal.net      - exclNet,
-          absOpp:    Math.abs(workbookSubtotal.opp - exclOpp),
-        };
-
-      } else {
-        console.log('[parse] Cap exclusion:', capRowLog.length, 'row(s) excluded, exclBudget=', Math.round(exclBudget/1000) + 'K, adjustment needed=', needsAdj);
-      }
-
-      // ── POST-ADJUSTMENT VALIDATION ───────────────────────────────────
-      // If the adjusted workbookSubtotal still diverges from lineItems by
-      // more than $1 000 (e.g. cap rows have negative budgets that over-
-      // correct when subtracted, or the SUBTOTAL range was mis-detected),
-      // fall back to the lineItems aggregation as the authoritative KPI
-      // source so that KPI cards always match the detail/category views.
-      let _lr = 0, _lo = 0, _ln = 0;
-      for (const li of lineItems) { _lr += li.risk||0; _lo += li.opp||0; _ln += li.net||0; }
-      const _postBudDiff  = Math.abs(workbookSubtotal.budget   - _lb);
-      const _postFcDiff   = Math.abs(workbookSubtotal.forecast - _lf);
-      if (_postBudDiff > 1000 || _postFcDiff > 1000) {
-        console.warn('[parse] Subtotal still diverges after Cap adj (budgetΔ=' +
-          Math.round(_postBudDiff/1000) + 'K, forecastΔ=' +
-          Math.round(_postFcDiff/1000) + 'K); falling back to lineItems aggregation for KPI cards');
-        workbookSubtotal = {
-          budget:    _lb,
-          forecast:  _lf,
-          actual:    _la,
-          remaining: _lf - _la,
-          risk:      _lr,
-          opp:       _lo,
-          net:       _ln,
-          absOpp:    Math.abs(_lo),
-        };
-      }
-    }
-
-    if (!lineItems.length) {
-      throw new Error('No data rows parsed. Check that the Master Data sheet has rows below the header.');
-    }
-
-    const _result = buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd, vendorCatNotes);
-    const _s = _result.summary;
-    const _ws = _result.workbookSubtotal;
-    if (_ws) {
-      console.log('Adjusted subtotal === line items?', {
-        budget:   Math.abs(_ws.budget   - _s.budget)   < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.budget   - _s.budget).toFixed(2),
-        forecast: Math.abs(_ws.forecast - _s.forecast) < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.forecast - _s.forecast).toFixed(2),
-        risk:     Math.abs(_ws.risk     - _s.risk)     < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.risk     - _s.risk).toFixed(2),
-        opp:      Math.abs(_ws.absOpp   - Math.abs(_s.opp)) < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.absOpp - Math.abs(_s.opp)).toFixed(2),
-        net:      Math.abs(_ws.net      - _s.net)      < 1 ? '✓ OK' : '✗ DIFF ' + (_ws.net      - _s.net).toFixed(2),
-      });
-    }
-    // ── Attach YTD Financials Run Rate data (authoritative KPI / chart source) ──
-    //
-    // SOURCE-OF-TRUTH SPLIT:
-    //   • YTD Financials Run Rate sheet → top KPI cards + Risk×Opp by Category chart.
-    //     This matches the control view users reconcile against in the workbook.
-    //   • Master Data lineItems → Back Pocket, vendor detail, project detail,
-    //     drilldowns, filter views.  All row-level data comes from here.
-    const _ytd = (() => {
-      try { return parseYTDSheet(wb); }
-      catch(e) { console.warn('[parse] YTD sheet parse failed:', e.message); return null; }
-    })();
-    if (_ytd) {
-      _result.ytdSummary    = _ytd.ytdSummary;
-      _result.ytdCategories = _ytd.ytdCategories;
-
-      // ── Console reconciliation check (non-visible) ───────────────────────
-      // Compares YTD Financials Run Rate Grand Total against Master Data
-      // lineItems aggregation.  Any diff > $1 K is flagged so analysts can
-      // detect stale pivots or parser row-scope mismatches immediately.
-      const _ys  = _ytd.ytdSummary;
-      const _md  = _result.summary;          // lineItems sum
-      const _diffs = {
-        budget:    Math.round(_md.budget   - _ys.budget),
-        forecast:  Math.round(_md.forecast - _ys.forecast),
-        risk:      Math.round(_md.risk     - _ys.risk),
-        opp:       Math.round(_md.opp      - _ys.opp),    // both signed
-        net:       Math.round(_md.net      - _ys.net),
-      };
-      const _anyDiff = Object.values(_diffs).some(d => Math.abs(d) > 1000);
-      if (_anyDiff) {
-        const _budMatch = Math.abs(_diffs.budget) <= 1000;
-        const _cause = _budMatch
-          ? 'Budget totals match but financial fields differ — rows were updated in Master Data after the YTD pivot was last refreshed (stale pivot cache).  Fix: open workbook, Data → Refresh All, save, re-upload.'
-          : 'Budget totals also differ — parser row scope may differ from the YTD pivot (different rows included/excluded).  Check subtotal range or filter state.';
-        console.warn('[reconcile] ⚠️  YTD Financials Run Rate and Master Data aggregation do not reconcile.\n' + _cause);
-        console.warn('[reconcile] Differences (Master Data − YTD), positive = MD higher:',
-          Object.fromEntries(
-            Object.entries(_diffs).map(([k, v]) => [k, '$' + (v/1000).toFixed(1) + 'K'])
-          )
-        );
-      } else {
-        console.log('[reconcile] ✅ YTD Financials Run Rate and Master Data reconcile within $1K.');
-      }
-    }
-    return _result;
-  }
-
-  // ── Parse YTD Financials Run Rate sheet ────────────────────────────────────
-  // Returns { ytdSummary, ytdCategories } or null on failure.
-  // ytdSummary  → headline KPI cards when no filter is active
-  // ytdCategories → Risk × Opp by Category chart, so bars match the KPIs
-  function parseYTDSheet(wb_) {
-    const ytdSheet = wb_.SheetNames.find(n => /ytd|run.?rate/i.test(n));
-    if (!ytdSheet) {
-      console.warn('[parse] YTD Financials Run Rate sheet not found — KPIs from Master Data');
-      return null;
-    }
-    const ws2  = wb_.Sheets[ytdSheet];
-    const rows = XLSX.utils.sheet_to_json(ws2, { header:1, defval:null, raw:true });
-
-    // Find column header row — row that has BOTH "Budget" and "Risk" in cells
-    let hdrIdx=-1, cBud=-1, cFc=-1, cRisk=-1, cOpp=-1, cNet=-1;
-    for (let r = 0; r < Math.min(rows.length, 8); r++) {
-      const row = rows[r] || [];
-      const hasBud  = row.some(v => /budget/i.test(str(v)));
-      const hasRisk = row.some(v => /risk/i.test(str(v)) && !/net/i.test(str(v)));
-      if (!hasBud || !hasRisk) continue;
-      hdrIdx = r;
-      row.forEach((v, i) => {
-        const s = str(v).toLowerCase();
-        if (s.includes('budget'))                                              cBud  = i;
-        if ((s.includes('actuals') || s.includes('forecast')) &&
-            !s.includes('budget'))                                             cFc   = i;
-        if (s.includes('risk') && !s.includes('net'))                         cRisk = i;
-        if (s.includes('opportun'))                                            cOpp  = i;
-        if (s.includes('net') && (s.includes('pos') || s.includes('ition')))  cNet  = i;
-      });
-      break;
-    }
-    if (hdrIdx < 0 || cBud < 0) {
-      console.warn('[parse] YTD sheet: column header not found');
-      return null;
-    }
-    if (cFc < 0) cFc = cBud + 1; // fallback: forecast column follows budget
-    console.log('[parse] YTD "' + ytdSheet + '" hdr=' + hdrIdx +
-      ' bud=' + cBud + ' fc=' + cFc + ' risk=' + cRisk + ' opp=' + cOpp + ' net=' + cNet);
-
-    const SKIP_RE = /transaction.?type|sub.?categ|row.?label|\(multiple|\(blank\)|domain.?owner|sum.?of/i;
-    const categories = [];
-    let   grandTotal = null;
-
-    for (let r = hdrIdx + 1; r < Math.min(rows.length, hdrIdx + 30); r++) {
-      const row = rows[r] || [];
-      if (row.every(v => v === null || v === '')) continue;
-
-      // Label = first non-numeric string in columns 0 → cBud-1
-      let label = '';
-      for (let c = 0; c < Math.max(1, cBud); c++) {
-        const v = str(row[c]);
-        if (v && !/^\d/.test(v)) { label = v; break; }
-      }
-      if (!label || SKIP_RE.test(label)) continue;
-
-      const budget   = num(row[cBud]);
-      const forecast = cFc   >= 0 ? num(row[cFc])   : 0;
-      const risk     = cRisk >= 0 ? num(row[cRisk])  : 0;
-      const opp      = cOpp  >= 0 ? num(row[cOpp])   : 0;
-      const net      = cNet  >= 0 ? num(row[cNet])   : (risk + opp);
-
-      if (/grand\s*total/i.test(label)) {
-        grandTotal = { budget, forecast, risk, opp, net };
-        break;
-      }
-      if (budget !== 0 || forecast !== 0) {
-        categories.push({ category: label, budget, forecast, risk, opp, net });
-      }
-    }
-
-    if (!grandTotal) {
-      console.warn('[parse] YTD sheet: Grand Total row not found — KPIs from Master Data');
-      return null;
-    }
-    console.log('[parse] YTD Grand Total: budget=$' + Math.round(grandTotal.budget/1000) + 'K' +
-      ' fc=$' + Math.round(grandTotal.forecast/1000) + 'K' +
-      ' risk=$' + Math.round(grandTotal.risk/1000) + 'K' +
-      ' opp=$' + Math.round(grandTotal.opp/1000) + 'K' +
-      ' net=$' + Math.round(grandTotal.net/1000) + 'K');
-    console.log('[parse] YTD categories:', categories.map(c => c.category).join(', '));
-
-    return {
-      ytdSummary: {
-        budget:   grandTotal.budget,
-        forecast: grandTotal.forecast,
-        risk:     grandTotal.risk,
-        opp:      grandTotal.opp,     // negative = favorable in workbook
-        absOpp:   Math.abs(grandTotal.opp),
-        net:      grandTotal.net,
-      },
-      ytdCategories: categories,
-    };
-  }
-
-  function uniq(arr) { return [...new Set(arr.filter(x => x !== '' && x != null))].sort(); }
-
-  function buildBundle(lineItems, rowCount, excludedCount, workbookSubtotal, subtotalRangeEnd, vendorCatNotes = new Map()) {
-    // Summary
-    const summary = lineItems.reduce((s, x) => ({
-      budget: s.budget + x.budget,
-      actual: s.actual + x.actual,
-      forecast: s.forecast + x.forecast,
-      risk: s.risk + x.risk,
-      opp: s.opp + x.opp,
-      net: s.net + x.net,
-    }), {budget:0, actual:0, forecast:0, risk:0, opp:0, net:0});
-    summary.remaining = summary.forecast - summary.actual;
-    summary.rowCount = rowCount;
-    summary.excludedCount = excludedCount;
-    // Back Pocket: sum of 2026 Net Position where Non-Committed flag = Y/Yes/True/1
-    // Capitalization rows are already excluded from lineItems — no extra filter needed.
-    const _isNcFlag = v => { const s = String(v || '').trim().toLowerCase(); return s==='y'||s==='yes'||s==='true'||s==='1'; };
-    const _bpRows   = lineItems.filter(li => _isNcFlag(li.nonCommitted));
-    const _bpRaw    = _bpRows.reduce((s, li) => s + (li.net || 0), 0);
-    console.log('[parse] Back Pocket → flaggedRows=' + _bpRows.length + ', rawNetSum=$' + Math.round(_bpRaw/1000) + 'K, displayedAbsValue=$' + Math.round(Math.abs(_bpRaw)/1000) + 'K');
-    summary.backPocket = Math.abs(_bpRaw);
-
-    // Aggregate by vendor
-    const byV = {};
-    for (const li of lineItems) {
-      const k = li.vendor || '(unspecified)';
-      if (!byV[k]) byV[k] = {
-        vendor: k, budget:0, actual:0, forecast:0, risk:0, opp:0, net:0,
-        domains: new Set(), domainOwners: new Set(),
-        monthlyAC: new Array(12).fill(0), monthlyFC: new Array(12).fill(0),
-        lineItems: []
-      };
-      const b = byV[k];
-      b.budget += li.budget; b.actual += li.actual; b.forecast += li.forecast;
-      b.risk += li.risk; b.opp += li.opp; b.net += li.net;
-      if (li.domain) b.domains.add(li.domain);
-      if (li.owner) b.domainOwners.add(li.owner);
-      li.monthlyAC.forEach((v,i)=>{ b.monthlyAC[i]+=v; });
-      li.monthlyFC.forEach((v,i)=>{ b.monthlyFC[i]+=v; });
-      b.lineItems.push(li);
-    }
-    const vendors = Object.values(byV)
-      .map(v => {
-        const catNotes = vendorCatNotes.get(v.vendor.toLowerCase());
-        return {
-          ...v,
-          domains: [...v.domains],
-          domainOwners: [...v.domainOwners],
-          ...(catNotes && catNotes.length ? { categoryNotes: catNotes } : {}),
-        };
-      })
-      .sort((a, b) => b.actual - a.actual);
-
-    // Aggregate by domain owner
-    const byO = {};
-    for (const li of lineItems) {
-      const k = li.owner || 'N/A';
-      if (!byO[k]) byO[k] = {
-        owner: k, budget:0, actual:0, forecast:0, risk:0, opp:0, net:0,
-        vendors: new Set(), domains: new Set()
-      };
-      const o = byO[k];
-      o.budget += li.budget; o.actual += li.actual; o.forecast += li.forecast;
-      o.risk += li.risk; o.opp += li.opp; o.net += li.net;
-      if (li.vendor) o.vendors.add(li.vendor);
-      if (li.domain) o.domains.add(li.domain);
-    }
-    const domainOwners = Object.values(byO).map(o => ({
-      ...o, vendors: [...o.vendors], domains: [...o.domains]
-    }));
-
-    // R&O log = items with material risk/opp
-    const riskOppLog = lineItems
-      .filter(x => Math.abs(x.net) > 100 || Math.abs(x.risk) > 100 || Math.abs(x.opp) > 100)
-      .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
-
-    // Lookups for filter bar
-    const lookups = {
-      domains: uniq(lineItems.map(x => x.domain)),
-      categories: uniq(lineItems.map(x => x.category)),
-      subCategories: uniq(lineItems.map(x => x.subCategory)),
-      onestreamCategories: uniq(lineItems.map(x => x.onestreamCategory)),
-      vendors: uniq(lineItems.map(x => x.vendor)),
-      owners: uniq(lineItems.map(x => x.owner)),
-    };
-
-    return {
-      summary, vendors, domainOwners, riskOppLog, lineItems, lookups, workbookSubtotal,
-      // rowScope: documents the row range used for all calculations.
-      // "auto" = formula was read from the SUBTOTAL cell; "fallback" = budget-sum matching.
-      // "none" = no SUBTOTAL row found; all rows processed.
-      rowScope: {
-        source: subtotalRangeEnd ? (workbookSubtotal ? 'auto' : 'fallback') : 'none',
-        maxExcelRow: subtotalRangeEnd || null,
-        rowsIncluded: rowCount,
-        rowsExcluded: (workbookSubtotal ? 1 : 0) + (subtotalRangeEnd ? 0 : 0), // SUBTOTAL + cap + out-of-range
-      },
-    };
-  }
-
-  // Public API
-  window.parseTechFinancialsXlsx = async function (file) {
-    const buf = await file.arrayBuffer();
-    return parseExcelArrayBuffer(buf);
-  };
-  window.parseTechFinancialsXlsxFromArrayBuffer = parseExcelArrayBuffer;
-})();
+window.DomainOwnersTab = DomainOwnersTab;
+window.RiskOppLogTab = RiskOppLogTab;

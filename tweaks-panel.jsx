@@ -1,668 +1,425 @@
-// Domain Owner tab + Risk & Opportunity Log tab
-const { useState: useStateD, useMemo: useMemoD } = React;
 
-function DomainOwnersTab({ data }) {
-  const [selected, setSelected] = useStateD(null);
-  // Real owners only (drop N/A) for the cards; keep N/A in summary
-  const owners = data.domainOwners
-    .filter(o => o.owner !== 'N/A')
-    .slice()
-    .sort((a,b) => b.budget - a.budget);
-  const totals = data.domainOwners.reduce((acc, o) => ({
-    budget: acc.budget + o.budget, actual: acc.actual + o.actual, forecast: acc.forecast + o.forecast,
-    risk: acc.risk + o.risk, opp: acc.opp + o.opp, net: acc.net + o.net,
-  }), {budget:0,actual:0,forecast:0,risk:0,opp:0,net:0});
+// tweaks-panel.jsx
+// Reusable Tweaks shell + form-control helpers.
+//
+// Owns the host protocol (listens for __activate_edit_mode / __deactivate_edit_mode,
+// posts __edit_mode_available / __edit_mode_set_keys / __edit_mode_dismissed) so
+// individual prototypes don't re-roll it. Ships a consistent set of controls so you
+// don't hand-draw <input type="range">, segmented radios, steppers, etc.
+//
+// Usage (in an HTML file that loads React + Babel):
+//
+//   const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+//     "primaryColor": "#D97757",
+//     "fontSize": 16,
+//     "density": "regular",
+//     "dark": false
+//   }/*EDITMODE-END*/;
+//
+//   function App() {
+//     const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+//     return (
+//       <div style={{ fontSize: t.fontSize, color: t.primaryColor }}>
+//         Hello
+//         <TweaksPanel>
+//           <TweakSection label="Typography" />
+//           <TweakSlider label="Font size" value={t.fontSize} min={10} max={32} unit="px"
+//                        onChange={(v) => setTweak('fontSize', v)} />
+//           <TweakRadio  label="Density" value={t.density}
+//                        options={['compact', 'regular', 'comfy']}
+//                        onChange={(v) => setTweak('density', v)} />
+//           <TweakSection label="Theme" />
+//           <TweakColor  label="Primary" value={t.primaryColor}
+//                        onChange={(v) => setTweak('primaryColor', v)} />
+//           <TweakToggle label="Dark mode" value={t.dark}
+//                        onChange={(v) => setTweak('dark', v)} />
+//         </TweaksPanel>
+//       </div>
+//     );
+//   }
+//
+// ─────────────────────────────────────────────────────────────────────────────
 
-  return (
-    <div>
-      {/* Portfolio summary strip */}
-      <div className="card mb-4">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Domain Owners — Portfolio Health</div>
-            <div className="card-sub">{owners.length} owners managing {fmt.m(totals.budget)} of approved budget · click any card to drill in</div>
-          </div>
-          <div className="flex gap-3 fs-tiny text-stone">
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#333C66',display:'inline-block'}}/>spent</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#6699FF',opacity:0.55,display:'inline-block'}}/>remaining</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#B23A3A',display:'inline-block'}}/>risk</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#2F7A4D',display:'inline-block'}}/>opp</span>
-          </div>
-          <ExportBtn onClick={() => xlsxExport(owners.map(o => ({
-            'Domain Owner': o.owner,
-            'Domains': (o.domains||[]).join('; '),
-            'Vendors': (o.vendors||[]).join('; '),
-            'Budget': o.budget, 'Actuals': o.actual, 'Forecast': o.forecast,
-            'Risk': o.risk, 'Opportunity': o.opp, 'Net': o.net,
-          })), 'Domain Owners')} />
-        </div>
-      </div>
-      <div className="owner-grid">
-        {owners.map(o => {
-          const remaining = o.budget - o.actual;
-          const consumed = o.budget > 0 ? (o.actual/o.budget * 100) : 0;
-          const isOver = consumed > 100;
-          const roTotal = o.risk + Math.abs(o.opp);
-          const riskShare = roTotal > 0 ? (o.risk/roTotal*100) : 0;
-          const oppShare = roTotal > 0 ? (Math.abs(o.opp)/roTotal*100) : 0;
-          return (
-            <button className="owner-card-v2" key={o.owner} onClick={() => setSelected(o)}>
-              <div className="ohead">
-                <div>
-                  <div className="oname">{o.owner}</div>
-                  <div className="orole">{OWNER_ROLES[o.owner] || ''} · {o.vendors.length} vendor{o.vendors.length===1?'':'s'}</div>
-                </div>
-                <div className={`onet ${o.net > 100 ? 'risk' : o.net < -100 ? 'opp' : ''}`}>
-                  <div className="onet-l">Net R/O</div>
-                  <div className="onet-v">{Math.abs(o.net) < 1 ? '$0' : fmt.signed(o.net)}</div>
-                </div>
-              </div>
-              <div className="okpis">
-                <div className="okpi">
-                  <div className="okpi-l">Annual Budget</div>
-                  <div className="okpi-v">{fmt.m2(o.budget)}</div>
-                </div>
-                <div className="okpi">
-                  <div className="okpi-l">YTD Actual</div>
-                  <div className="okpi-v">{fmt.m2(o.actual)}</div>
-                  <div className="okpi-s">{consumed.toFixed(1)}% spent</div>
-                </div>
-                <div className="okpi">
-                  <div className="okpi-l">Remaining Budget</div>
-                  <div className={`okpi-v ${isOver ? 'risk' : ''}`}>{fmt.m2(remaining)}</div>
-                  <div className="okpi-s">{(100-consumed).toFixed(1)}% available</div>
-                </div>
-                <div className="okpi">
-                  <div className="okpi-l">Risk / Opp</div>
-                  <div className="okpi-v" style={{display:'flex', gap:8, alignItems:'baseline', fontSize: 16}}>
-                    <span className="text-risk">{fmt.k(o.risk)}</span>
-                    <span style={{color:'var(--antares-stone-gray)', fontSize:12}}>/</span>
-                    <span className="text-opp">{fmt.k(Math.abs(o.opp))}</span>
-                  </div>
-                </div>
-                <div className="okpi">
-                  <div className="okpi-l">Year-End Forecast</div>
-                  <div className="okpi-v" style={{color: (o.budget + o.net) > o.budget ? 'var(--risk-red)' : 'var(--antares-signature-navy)'}}>{fmt.m2(o.budget + o.net)}</div>
-                  <div className="okpi-s">{fmt.signed(o.net)} vs budget</div>
-                </div>
-              </div>
+const __TWEAKS_STYLE = `
+  .twk-panel{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:280px;
+    max-height:calc(100vh - 32px);display:flex;flex-direction:column;
+    background:rgba(250,249,247,.78);color:#29261b;
+    -webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);
+    border:.5px solid rgba(255,255,255,.6);border-radius:14px;
+    box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 40px rgba(0,0,0,.18);
+    font:11.5px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
+  .twk-hd{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 8px 10px 14px;cursor:move;user-select:none}
+  .twk-hd b{font-size:12px;font-weight:600;letter-spacing:.01em}
+  .twk-x{appearance:none;border:0;background:transparent;color:rgba(41,38,27,.55);
+    width:22px;height:22px;border-radius:6px;cursor:default;font-size:13px;line-height:1}
+  .twk-x:hover{background:rgba(0,0,0,.06);color:#29261b}
+  .twk-body{padding:2px 14px 14px;display:flex;flex-direction:column;gap:10px;
+    overflow-y:auto;overflow-x:hidden;min-height:0;
+    scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.15) transparent}
+  .twk-body::-webkit-scrollbar{width:8px}
+  .twk-body::-webkit-scrollbar-track{background:transparent;margin:2px}
+  .twk-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.15);border-radius:4px;
+    border:2px solid transparent;background-clip:content-box}
+  .twk-body::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.25);
+    border:2px solid transparent;background-clip:content-box}
+  .twk-row{display:flex;flex-direction:column;gap:5px}
+  .twk-row-h{flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
+  .twk-lbl{display:flex;justify-content:space-between;align-items:baseline;
+    color:rgba(41,38,27,.72)}
+  .twk-lbl>span:first-child{font-weight:500}
+  .twk-val{color:rgba(41,38,27,.5);font-variant-numeric:tabular-nums}
 
-              {/* Budget consumed bar */}
-              <div className="obar-block">
-                <div className="obar-cap">
-                  <span>Budget Consumption</span>
-                  <span className="tabular">{consumed.toFixed(1)}%</span>
-                </div>
-                <div className="obar">
-                  <div className="obar-spent" style={{width: `${Math.min(consumed,100)}%`}} />
-                  {!isOver && <div className="obar-remain" style={{left: `${consumed}%`, width: `${100-consumed}%`}} />}
-                </div>
-              </div>
+  .twk-sect{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:rgba(41,38,27,.45);padding:10px 0 0}
+  .twk-sect:first-child{padding-top:0}
 
-              {/* R&O composition */}
-              {roTotal > 100 && (
-                <div className="obar-block">
-                  <div className="obar-cap">
-                    <span>R&O Exposure</span>
-                    <span className="tabular">{fmt.k(roTotal)}</span>
-                  </div>
-                  <div className="obar ro">
-                    {riskShare > 0 && <div className="obar-risk" style={{width: `${riskShare}%`}} />}
-                    {oppShare > 0 && <div className="obar-opp" style={{width: `${oppShare}%`, left: `${riskShare}%`}} />}
-                  </div>
-                </div>
-              )}
+  .twk-field{appearance:none;width:100%;height:26px;padding:0 8px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:7px;
+    background:rgba(255,255,255,.6);color:inherit;font:inherit;outline:none}
+  .twk-field:focus{border-color:rgba(0,0,0,.25);background:rgba(255,255,255,.85)}
+  select.twk-field{padding-right:22px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='rgba(0,0,0,.5)' d='M0 0h10L5 6z'/></svg>");
+    background-repeat:no-repeat;background-position:right 8px center}
 
-              <div className="ofoot">
-                <span>{o.domains.length} domain{o.domains.length===1?'':'s'}</span>
-                <span className="odrill">View details →</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+  .twk-slider{appearance:none;-webkit-appearance:none;width:100%;height:4px;margin:6px 0;
+    border-radius:999px;background:rgba(0,0,0,.12);outline:none}
+  .twk-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:14px;height:14px;border-radius:50%;background:#fff;
+    border:.5px solid rgba(0,0,0,.12);box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:default}
+  .twk-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+    background:#fff;border:.5px solid rgba(0,0,0,.12);box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:default}
 
-      {selected && <DomainOwnerDrill owner={selected} data={data} onClose={() => setSelected(null)} />}
+  .twk-seg{position:relative;display:flex;padding:2px;border-radius:8px;
+    background:rgba(0,0,0,.06);user-select:none}
+  .twk-seg-thumb{position:absolute;top:2px;bottom:2px;border-radius:6px;
+    background:rgba(255,255,255,.9);box-shadow:0 1px 2px rgba(0,0,0,.12);
+    transition:left .15s cubic-bezier(.3,.7,.4,1),width .15s}
+  .twk-seg.dragging .twk-seg-thumb{transition:none}
+  .twk-seg button{appearance:none;position:relative;z-index:1;flex:1;border:0;
+    background:transparent;color:inherit;font:inherit;font-weight:500;min-height:22px;
+    border-radius:6px;cursor:default;padding:4px 6px;line-height:1.2;
+    overflow-wrap:anywhere}
 
-      {/* Annual Budget vs Year-End Forecast by Domain Owner */}
-      <div className="card mt-4">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Annual Budget vs Year-End Forecast by Domain Owner</div>
-            <div className="card-sub">Sorted by Annual Budget · descending</div>
-          </div>
-          <div className="flex gap-3 fs-tiny text-stone">
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#333C66',display:'inline-block'}}/>annual budget</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'#6699FF',display:'inline-block'}}/>year-end forecast</span>
-            <span className="flex items-center gap-2"><span style={{width:10,height:10,background:'var(--risk-red)',display:'inline-block'}}/>over budget</span>
-          </div>
-        </div>
-        {(() => {
-          const ownersSorted = owners.slice().sort((a,b) => b.budget - a.budget);
-          const max = Math.max(...ownersSorted.map(o => Math.max(o.budget, o.budget + o.net)), 1);
-          return (
-            <div>
-              {ownersSorted.map(o => {
-                const yef = o.budget + o.net;
-                const bw = (o.budget / max) * 100;
-                const fw = (yef / max) * 100;
-                const over = yef > o.budget;
-                return (
-                  <div key={o.owner} style={{display:'grid', gridTemplateColumns:'200px 1fr 220px', gap:14, alignItems:'center', padding:'10px 0', borderBottom:'1px solid var(--grid-line)', cursor:'pointer'}} onClick={() => setSelected(o)}>
-                    <div>
-                      <div style={{fontWeight:600, color:'var(--antares-signature-navy)', fontSize:13}}>{o.owner}</div>
-                      <div className="fs-tiny text-stone">{OWNER_ROLES[o.owner] || ''}</div>
-                    </div>
-                    <div style={{display:'grid', gridTemplateRows:'1fr 1fr', gap:4}}>
-                      <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
-                        <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${bw}%`, background:'#333C66'}} />
-                        <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)'}}>budget</div>
-                      </div>
-                      <div style={{position:'relative', height:16, background:'#FAFAF8'}}>
-                        <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${fw}%`, background: over ? 'var(--risk-red)' : '#6699FF'}} />
-                        <div style={{position:'absolute', right:6, top:0, bottom:0, display:'flex', alignItems:'center', fontSize:11, color:'var(--antares-stone-gray)'}}>forecast</div>
-                      </div>
-                    </div>
-                    <div className="text-right tabular fs-small" style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6}}>
-                      <span style={{color:'var(--antares-signature-navy)', fontWeight:600}}>{fmt.k(o.budget)}</span>
-                      <span style={{color: over ? 'var(--risk-red)' : 'var(--antares-bright-blue-600)', fontWeight:600}}>{fmt.k(yef)}</span>
-                      <span style={{color: over ? 'var(--risk-red)' : 'var(--opp-green)', fontWeight:600}}>{fmt.signed(yef - o.budget)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
-      </div>
-    </div>
-  );
+  .twk-toggle{position:relative;width:32px;height:18px;border:0;border-radius:999px;
+    background:rgba(0,0,0,.15);transition:background .15s;cursor:default;padding:0}
+  .twk-toggle[data-on="1"]{background:#34c759}
+  .twk-toggle i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+  .twk-toggle[data-on="1"] i{transform:translateX(14px)}
+
+  .twk-num{display:flex;align-items:center;height:26px;padding:0 0 0 8px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:7px;background:rgba(255,255,255,.6)}
+  .twk-num-lbl{font-weight:500;color:rgba(41,38,27,.6);cursor:ew-resize;
+    user-select:none;padding-right:8px}
+  .twk-num input{flex:1;min-width:0;height:100%;border:0;background:transparent;
+    font:inherit;font-variant-numeric:tabular-nums;text-align:right;padding:0 8px 0 0;
+    outline:none;color:inherit;-moz-appearance:textfield}
+  .twk-num input::-webkit-inner-spin-button,.twk-num input::-webkit-outer-spin-button{
+    -webkit-appearance:none;margin:0}
+  .twk-num-unit{padding-right:8px;color:rgba(41,38,27,.45)}
+
+  .twk-btn{appearance:none;height:26px;padding:0 12px;border:0;border-radius:7px;
+    background:rgba(0,0,0,.78);color:#fff;font:inherit;font-weight:500;cursor:default}
+  .twk-btn:hover{background:rgba(0,0,0,.88)}
+  .twk-btn.secondary{background:rgba(0,0,0,.06);color:inherit}
+  .twk-btn.secondary:hover{background:rgba(0,0,0,.1)}
+
+  .twk-swatch{appearance:none;-webkit-appearance:none;width:56px;height:22px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:6px;padding:0;cursor:default;
+    background:transparent;flex-shrink:0}
+  .twk-swatch::-webkit-color-swatch-wrapper{padding:0}
+  .twk-swatch::-webkit-color-swatch{border:0;border-radius:5.5px}
+  .twk-swatch::-moz-color-swatch{border:0;border-radius:5.5px}
+`;
+
+// ── useTweaks ───────────────────────────────────────────────────────────────
+// Single source of truth for tweak values. setTweak persists via the host
+// (__edit_mode_set_keys → host rewrites the EDITMODE block on disk).
+function useTweaks(defaults) {
+  const [values, setValues] = React.useState(defaults);
+  // Accepts either setTweak('key', value) or setTweak({ key: value, ... }) so a
+  // useState-style call doesn't write a "[object Object]" key into the persisted
+  // JSON block.
+  const setTweak = React.useCallback((keyOrEdits, val) => {
+    const edits = typeof keyOrEdits === 'object' && keyOrEdits !== null
+      ? keyOrEdits : { [keyOrEdits]: val };
+    setValues((prev) => ({ ...prev, ...edits }));
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits }, '*');
+  }, []);
+  return [values, setTweak];
 }
 
-function DomainOwnerDrill({ owner: o, data, onClose }) {
-  // Filter vendors that belong to this owner
-  const ownerVendors = data.vendors
-    .filter(v => v.domainOwners.includes(o.owner))
-    .sort((a,b) => b.actual - a.actual);
+// ── TweaksPanel ─────────────────────────────────────────────────────────────
+// Floating shell. Registers the protocol listener BEFORE announcing
+// availability — if the announce ran first, the host's activate could land
+// before our handler exists and the toolbar toggle would silently no-op.
+// The close button posts __edit_mode_dismissed so the host's toolbar toggle
+// flips off in lockstep; the host echoes __deactivate_edit_mode back which
+// is what actually hides the panel.
+function TweaksPanel({ title = 'Tweaks', children }) {
+  const [open, setOpen] = React.useState(false);
+  const dragRef = React.useRef(null);
+  const offsetRef = React.useRef({ x: 16, y: 16 });
+  const PAD = 16;
 
-  // Aggregate monthly across all vendors for this owner
-  const monthlyAC = new Array(12).fill(0);
-  const monthlyFC = new Array(12).fill(0);
-  ownerVendors.forEach(v => {
-    v.monthlyAC.forEach((x, i) => monthlyAC[i] += x);
-    v.monthlyFC.forEach((x, i) => monthlyFC[i] += x);
-  });
+  const clampToViewport = React.useCallback(() => {
+    const panel = dragRef.current;
+    if (!panel) return;
+    const w = panel.offsetWidth, h = panel.offsetHeight;
+    const maxRight = Math.max(PAD, window.innerWidth - w - PAD);
+    const maxBottom = Math.max(PAD, window.innerHeight - h - PAD);
+    offsetRef.current = {
+      x: Math.min(maxRight, Math.max(PAD, offsetRef.current.x)),
+      y: Math.min(maxBottom, Math.max(PAD, offsetRef.current.y)),
+    };
+    panel.style.right = offsetRef.current.x + 'px';
+    panel.style.bottom = offsetRef.current.y + 'px';
+  }, []);
 
-  // Collect all line items for this owner (across vendors)
-  const allLineItems = [];
-  ownerVendors.forEach(v => {
-    v.lineItems.forEach(li => allLineItems.push({ ...li, vendor: v.vendor }));
-  });
-
-  // Top R&O items
-  const topRO = allLineItems
-    .filter(li => Math.abs(li.net) > 100)
-    .sort((a,b) => Math.abs(b.net) - Math.abs(a.net))
-    .slice(0, 8);
-
-  const remaining = o.budget - o.actual;
-  const consumed = o.budget > 0 ? (o.actual/o.budget * 100) : 0;
-
-  return (
-    <div className="drill-overlay" onClick={onClose}>
-      <div className="drill-panel drill-panel-wide" onClick={e => e.stopPropagation()}>
-        <div className="drill-head">
-          <button className="drill-close" onClick={onClose}>✕ close</button>
-          <div className="ec section-h-sm" style={{textTransform:'uppercase',letterSpacing:'0.12em',fontSize:11,color:'rgba(255,255,255,0.6)',fontWeight:700}}>Domain Owner Drill-Down</div>
-          <h2>{o.owner}</h2>
-          <div className="meta">
-            <span>{OWNER_ROLES[o.owner] || ''}</span>
-            <span>·</span>
-            <span>{ownerVendors.length} vendors</span>
-            <span>·</span>
-            <span>{o.domains.length} domain{o.domains.length===1?'':'s'}</span>
-            <span>·</span>
-            <span>{allLineItems.length} line items</span>
-          </div>
-        </div>
-        <div className="drill-body">
-          <div className="drill-kpi-grid">
-            <div className="drill-kpi"><div className="l">Annual Budget</div><div className="v">{fmt.m2(o.budget)}</div></div>
-            <div className="drill-kpi"><div className="l">YTD Actual Spent</div><div className="v">{fmt.m2(o.actual)}</div><div className="fs-tiny text-stone">{consumed.toFixed(1)}% of budget</div></div>
-            <div className="drill-kpi"><div className="l">Remaining Budget</div><div className="v">{fmt.m2(remaining)}</div></div>
-            <div className="drill-kpi"><div className="l">Net Opp/Risk</div><div className={`v ${o.net > 100 ? 'risk' : o.net < -100 ? 'opp' : ''}`}>{Math.abs(o.net) < 1 ? '—' : fmt.signed2(o.net)}</div></div>
-          </div>
-
-          {/* Domains */}
-          {o.domains.length > 0 && (
-            <div style={{marginBottom: 22}}>
-              <div className="section-h" style={{marginBottom:10}}>Domains Managed</div>
-              <div style={{display:'flex', flexWrap:'wrap', gap: 8}}>
-                {o.domains.map(d => <span key={d} className="chip-static">{d}</span>)}
-              </div>
-            </div>
-          )}
-
-          {/* Vendor breakdown */}
-          <div className="section-h" style={{marginBottom:10}}>Vendors ({ownerVendors.length})</div>
-          <div style={{overflowX:'auto', marginBottom: 22}}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Vendor</th>
-                  <th className="num">Budget</th>
-                  <th className="num">YTD Actual</th>
-                  <th className="num">Forecast</th>
-                  <th className="num">% Spent</th>
-                  <th className="num">Net R/O</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ownerVendors.map((v, i) => {
-                  const c = v.budget > 0 ? (v.actual/v.budget*100) : 0;
-                  return (
-                    <tr key={i}>
-                      <td className="vendor-name">{v.vendor}</td>
-                      <td className="num">{fmt.k(v.budget)}</td>
-                      <td className="num">{fmt.k(v.actual)}</td>
-                      <td className="num">{fmt.k(v.forecast)}</td>
-                      <td className="num">{c.toFixed(1)}%</td>
-                      <td className={`num ${v.net > 100 ? 'neg' : v.net < -100 ? 'pos' : 'zero'}`}>{Math.abs(v.net) < 1 ? '—' : fmt.signed(v.net)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Monthly breakdown */}
-          <div className="section-h" style={{marginBottom:10}}>Monthly Breakdown</div>
-          {(() => {
-            const ytdMonths = 3;
-            const totalAC = monthlyAC.reduce((a,b)=>a+b,0);
-            const totalFC = monthlyFC.reduce((a,b)=>a+b,0);
-            return (
-              <div style={{overflowX:'auto', marginBottom: 22}}>
-                <table className="tbl tbl-monthly">
-                  <thead>
-                    <tr>
-                      <th></th>
-                      {MONTHS.map(m => <th key={m} className="num" style={{textAlign:'center', fontWeight:600}}>{m.charAt(0).toUpperCase()+m.slice(1)}</th>)}
-                      <th className="num" style={{fontWeight:600}}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Actuals</td>
-                      {monthlyAC.map((ac, i) => (
-                        <td key={i} className="num" style={{color: ac > 0 ? 'var(--antares-signature-navy)' : 'var(--antares-stone-gray)'}}>{ac > 0 ? fmt.k(ac) : '—'}</td>
-                      ))}
-                      <td className="num" style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>{fmt.k(totalAC)}</td>
-                    </tr>
-                    <tr>
-                      <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Forecast</td>
-                      {monthlyFC.map((fc, i) => (
-                        <td key={i} className="num" style={{color: fc > 0 ? 'var(--antares-bright-blue-600)' : 'var(--antares-stone-gray)'}}>{fc > 0 ? fmt.k(fc) : '—'}</td>
-                      ))}
-                      <td className="num" style={{fontWeight:600, color:'var(--antares-bright-blue-600)'}}>{fmt.k(totalFC)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
-
-          {/* Top R&O drivers for this owner */}
-          {topRO.length > 0 && (
-            <>
-              <div className="section-h" style={{marginBottom:10}}>Top Risk & Opportunity Drivers</div>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th style={{width:70}}>Type</th>
-                    <th>Vendor</th>
-                    <th>Application / Item</th>
-                    <th className="num">Net</th>
-                    <th>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topRO.map((it, i) => (
-                    <tr key={i}>
-                      <td>{it.net > 100 ? <span className="badge risk">RISK</span> : <span className="badge opp">OPP</span>}</td>
-                      <td className="vendor-name">{it.vendor}</td>
-                      <td>
-                        <div style={{fontWeight:500}}>{it.application || it.subCategory || it.project}</div>
-                        <div className="fs-tiny text-stone">{it.treatment}</div>
-                      </td>
-                      <td className={`num ${it.net > 100 ? 'neg' : 'pos'}`}>{fmt.signed(it.net)}</td>
-                      <td className="fs-small text-stone" style={{maxWidth:280}}>{(it.notes||'').toString().trim() || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RiskOppLogTab({ data }) {
-  const [tab, setTab] = useStateD('all');
-  const [search, setSearch] = useStateD('');
-  const [drill, setDrill] = useStateD(null);   // 'risks' | 'opps' | 'net' for KPI drill
-  const [rowDrill, setRowDrill] = useStateD(null); // single-row drill
-
-  const items = useMemoD(() => {
-    let v = data.riskOppLog.slice();
-    if (tab === 'risks') v = v.filter(x => x.net > 100);
-    if (tab === 'opps') v = v.filter(x => x.net < -100);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      v = v.filter(x => (x.vendor||'').toLowerCase().includes(q) || (x.notes||'').toLowerCase().includes(q) || (x.application||'').toLowerCase().includes(q));
+  React.useEffect(() => {
+    if (!open) return;
+    clampToViewport();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', clampToViewport);
+      return () => window.removeEventListener('resize', clampToViewport);
     }
-    return v;
-  }, [tab, search, data.riskOppLog]);
+    const ro = new ResizeObserver(clampToViewport);
+    ro.observe(document.documentElement);
+    return () => ro.disconnect();
+  }, [open, clampToViewport]);
 
-  const totalRisk = data.riskOppLog.filter(x => x.net > 100).reduce((s,x)=>s+x.net, 0);
-  const totalOpp = data.riskOppLog.filter(x => x.net < -100).reduce((s,x)=>s+x.net, 0);
-  const riskCount = data.riskOppLog.filter(x => x.net > 100).length;
-  const oppCount = data.riskOppLog.filter(x => x.net < -100).length;
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      const t = e?.data?.type;
+      if (t === '__activate_edit_mode') setOpen(true);
+      else if (t === '__deactivate_edit_mode') setOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
 
+  const dismiss = () => {
+    setOpen(false);
+    window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
+  };
+
+  const onDragStart = (e) => {
+    const panel = dragRef.current;
+    if (!panel) return;
+    const r = panel.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY;
+    const startRight = window.innerWidth - r.right;
+    const startBottom = window.innerHeight - r.bottom;
+    const move = (ev) => {
+      offsetRef.current = {
+        x: startRight - (ev.clientX - sx),
+        y: startBottom - (ev.clientY - sy),
+      };
+      clampToViewport();
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  if (!open) return null;
   return (
-    <div>
-      <div className="kpi-grid mb-4" style={{gridTemplateColumns:'repeat(3,1fr)'}}>
-        <button className="kpi risk-tile kpi-clickable" onClick={() => setDrill('risks')}>
-          <div className="kpi-label">total risk exposure</div>
-          <div className="kpi-value risk">{fmt.m(totalRisk)}</div>
-          <div className="kpi-sub">{riskCount} risk items logged · click to drill in →</div>
-        </button>
-        <button className="kpi opp-tile kpi-clickable" onClick={() => setDrill('opps')}>
-          <div className="kpi-label">total opp upside</div>
-          <div className="kpi-value opp">{fmt.m(Math.abs(totalOpp))}</div>
-          <div className="kpi-sub">{oppCount} opportunity items logged · click to drill in →</div>
-        </button>
-        <button className="kpi net-tile kpi-clickable" onClick={() => setDrill('net')}>
-          <div className="kpi-label">net position</div>
-          <div className="kpi-value" style={{color: (totalRisk+totalOpp) > 0 ? 'var(--risk-red)' : (totalRisk+totalOpp) < 0 ? 'var(--opp-green)' : 'inherit'}}>{fmt.signed(totalRisk + totalOpp)}</div>
-          <div className="kpi-sub">{(totalRisk + totalOpp) > 0 ? 'unfavorable' : 'favorable'} to budget · click to drill in →</div>
-        </button>
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Risk & Opportunity Log</div>
-            <div className="card-sub">{items.length} items · click any row to view full detail</div>
-          </div>
-          <div className="flex gap-3 items-center">
-            <div className="chips">
-              <button className={`chip ${tab==='all'?'active':''}`} onClick={()=>setTab('all')}>All ({data.riskOppLog.length})</button>
-              <button className={`chip ${tab==='risks'?'active':''}`} onClick={()=>setTab('risks')}>Risks</button>
-              <button className={`chip ${tab==='opps'?'active':''}`} onClick={()=>setTab('opps')}>Opportunities</button>
-            </div>
-            <div className="search-box">
-              <Icon name="search" size={14} color="#807E7A" />
-              <input type="text" placeholder="Search items, notes…" value={search} onChange={e=>setSearch(e.target.value)} />
-            </div>
-          </div>
-          <ExportBtn onClick={() => xlsxExport(items.map(x => ({
-            'Vendor': x.vendor, 'Domain': x.domain, 'Owner': x.owner,
-            'Project': x.project, 'Application': x.application,
-            'Category': x.category, 'Sub-Category': x.subCategory,
-            'Budget': x.budget, 'Forecast': x.forecast,
-            'Risk': x.risk, 'Opportunity': x.opp, 'Net': x.net,
-            'Notes': x.notesRO || x.notes || '',
-          })), `Risk & Opp Log`)} />
+    <>
+      <style>{__TWEAKS_STYLE}</style>
+      <div ref={dragRef} className="twk-panel" data-noncommentable=""
+           style={{ right: offsetRef.current.x, bottom: offsetRef.current.y }}>
+        <div className="twk-hd" onMouseDown={onDragStart}>
+          <b>{title}</b>
+          <button className="twk-x" aria-label="Close tweaks"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={dismiss}>✕</button>
         </div>
-        <div style={{overflowX:'auto'}}>
-          <table className="tbl tbl-clickable">
-            <thead>
-              <tr>
-                <th style={{width:60}}>Type</th>
-                <th>Vendor</th>
-                <th>Application / Item</th>
-                <th>Owner</th>
-                <th className="num">Budget</th>
-                <th className="num">Forecast</th>
-                <th className="num">Net</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it, i) => (
-                <tr key={i} onClick={() => setRowDrill(it)}>
-                  <td>
-                    {it.net > 100
-                      ? <span className="badge risk">RISK</span>
-                      : it.net < -100
-                        ? <span className="badge opp">OPP</span>
-                        : <span className="badge neutral">FLAT</span>}
-                  </td>
-                  <td className="vendor-name">{it.vendor || '—'}</td>
-                  <td>
-                    <div style={{fontWeight:500}}>{it.application || it.subCategory || it.project}</div>
-                    <div className="fs-tiny text-stone">{it.treatment}</div>
-                  </td>
-                  <td className="fs-small text-stone">{it.owner === 'N/A' ? '—' : it.owner}</td>
-                  <td className="num">{fmt.k(it.budget)}</td>
-                  <td className="num">{fmt.k(it.forecast)}</td>
-                  <td className={`num ${it.net > 100 ? 'neg' : it.net < -100 ? 'pos' : 'zero'}`}>{Math.abs(it.net) < 1 ? '—' : fmt.signed(it.net)}</td>
-                  <td className="fs-small text-stone" style={{maxWidth:280}}>{it.notes || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <div className="twk-body">{children}</div>
       </div>
+    </>
+  );
+}
 
-      {drill && <RiskOppKpiDrill kind={drill} data={data} onClose={() => setDrill(null)} onPickRow={(it)=>{ setDrill(null); setRowDrill(it); }} />}
-      {rowDrill && <RiskOppItemDrill item={rowDrill} onClose={() => setRowDrill(null)} />}
+// ── Layout helpers ──────────────────────────────────────────────────────────
+
+function TweakSection({ label, children }) {
+  return (
+    <>
+      <div className="twk-sect">{label}</div>
+      {children}
+    </>
+  );
+}
+
+function TweakRow({ label, value, children, inline = false }) {
+  return (
+    <div className={inline ? 'twk-row twk-row-h' : 'twk-row'}>
+      <div className="twk-lbl">
+        <span>{label}</span>
+        {value != null && <span className="twk-val">{value}</span>}
+      </div>
+      {children}
     </div>
   );
 }
 
-// KPI tile drill (filtered list of risks / opps / all)
-function RiskOppKpiDrill({ kind, data, onClose, onPickRow }) {
-  const all = data.riskOppLog;
-  let items, title, subtitle, color, total;
-  if (kind === 'risks') {
-    items = all.filter(x => x.net > 100).sort((a,b) => b.net - a.net);
-    title = 'Risk Exposure — Detailed View';
-    subtitle = `${items.length} risk items · downside to budget`;
-    color = 'var(--risk-red)';
-    total = items.reduce((s,x)=>s+x.net,0);
-  } else if (kind === 'opps') {
-    items = all.filter(x => x.net < -100).sort((a,b) => a.net - b.net);
-    title = 'Opportunity Upside — Detailed View';
-    subtitle = `${items.length} opportunity items · favorable to budget`;
-    color = 'var(--opp-green)';
-    total = items.reduce((s,x)=>s+x.net,0);
-  } else {
-    items = all.slice().sort((a,b) => Math.abs(b.net) - Math.abs(a.net));
-    title = 'Net Position — All Items';
-    subtitle = `${items.length} items contributing to the full-year net forecast position`;
-    color = 'var(--antares-signature-navy)';
-    total = items.reduce((s,x)=>s+x.net,0);
-  }
+// ── Controls ────────────────────────────────────────────────────────────────
 
-  // Group by owner
-  const byOwner = {};
-  items.forEach(it => {
-    const o = it.owner === 'N/A' ? 'Unallocated' : (it.owner || 'Unallocated');
-    if (!byOwner[o]) byOwner[o] = { owner: o, count: 0, total: 0 };
-    byOwner[o].count += 1;
-    byOwner[o].total += it.net;
-  });
-  const ownerRows = Object.values(byOwner).sort((a,b) => Math.abs(b.total) - Math.abs(a.total));
-
+function TweakSlider({ label, value, min = 0, max = 100, step = 1, unit = '', onChange }) {
   return (
-    <div className="drill-overlay" onClick={onClose}>
-      <div className="drill-panel drill-panel-wide" onClick={e => e.stopPropagation()}>
-        <div className="drill-head">
-          <button className="drill-close" onClick={onClose}>✕ close</button>
-          <div className="ec section-h-sm" style={{textTransform:'uppercase',letterSpacing:'0.12em',fontSize:11,color:'rgba(255,255,255,0.6)',fontWeight:700}}>
-            {kind === 'risks' ? 'Risk Drill-Down' : kind === 'opps' ? 'Opportunity Drill-Down' : 'Net Position Drill-Down'}
-          </div>
-          <h2>{title}</h2>
-          <div className="meta"><span>{subtitle}</span><span>·</span><span style={{fontVariantNumeric:'tabular-nums'}}>Total: {fmt.signed2(total)}</span></div>
-        </div>
-        <div className="drill-body">
-          {/* By Owner summary */}
-          <div className="section-h" style={{marginBottom:10}}>By Domain Owner</div>
-          <div style={{overflowX:'auto', marginBottom: 22}}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Owner</th>
-                  <th className="num">Items</th>
-                  <th className="num">Net Impact</th>
-                  <th>Distribution</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ownerRows.map((r, i) => {
-                  const max = Math.max(...ownerRows.map(x => Math.abs(x.total)), 1);
-                  const w = Math.abs(r.total)/max*100;
-                  return (
-                    <tr key={i}>
-                      <td className="vendor-name">{r.owner}</td>
-                      <td className="num">{r.count}</td>
-                      <td className={`num ${r.total > 0 ? 'neg' : 'pos'}`} style={{fontVariantNumeric:'tabular-nums'}}>{fmt.signed(r.total)}</td>
-                      <td>
-                        <div style={{height:8, background:'#F5F4F1', position:'relative', width:'100%', maxWidth:240}}>
-                          <div style={{position:'absolute', left:0, top:0, bottom:0, width:`${w}%`, background: r.total > 0 ? 'var(--risk-red)' : 'var(--opp-green)'}} />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+    <TweakRow label={label} value={`${value}${unit}`}>
+      <input type="range" className="twk-slider" min={min} max={max} step={step}
+             value={value} onChange={(e) => onChange(Number(e.target.value))} />
+    </TweakRow>
+  );
+}
 
-          {/* Item list */}
-          <div className="section-h" style={{marginBottom:10}}>All Items ({items.length})</div>
-          <table className="tbl tbl-clickable">
-            <thead>
-              <tr>
-                <th style={{width:50}}></th>
-                <th>Vendor</th>
-                <th>Application / Item</th>
-                <th>Owner</th>
-                <th className="num">Net</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it, i) => (
-                <tr key={i} onClick={() => onPickRow(it)}>
-                  <td>
-                    {it.net > 0
-                      ? <span className="badge risk">RISK</span>
-                      : <span className="badge opp">OPP</span>}
-                  </td>
-                  <td className="vendor-name">{it.vendor || '—'}</td>
-                  <td>
-                    <div style={{fontWeight:500}}>{it.application || it.subCategory || it.project}</div>
-                    <div className="fs-tiny text-stone">{it.treatment}</div>
-                  </td>
-                  <td className="fs-small text-stone">{it.owner === 'N/A' ? '—' : it.owner}</td>
-                  <td className={`num ${it.net > 0 ? 'neg' : 'pos'}`}>{fmt.signed(it.net)}</td>
-                  <td className="fs-small text-stone" style={{maxWidth:300}}>{it.notes || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+function TweakToggle({ label, value, onChange }) {
+  return (
+    <div className="twk-row twk-row-h">
+      <div className="twk-lbl"><span>{label}</span></div>
+      <button type="button" className="twk-toggle" data-on={value ? '1' : '0'}
+              role="switch" aria-checked={!!value}
+              onClick={() => onChange(!value)}><i /></button>
     </div>
   );
 }
 
-// Single-item drill — full detail
-function RiskOppItemDrill({ item: it, onClose }) {
-  const isRisk = it.net > 100;
-  const isOpp = it.net < -100;
+function TweakRadio({ label, value, options, onChange }) {
+  const trackRef = React.useRef(null);
+  const [dragging, setDragging] = React.useState(false);
+  const opts = options.map((o) => (typeof o === 'object' ? o : { value: o, label: o }));
+  const idx = Math.max(0, opts.findIndex((o) => o.value === value));
+  const n = opts.length;
+
+  // The active value is read by pointer-move handlers attached for the lifetime
+  // of a drag — ref it so a stale closure doesn't fire onChange for every move.
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+
+  const segAt = (clientX) => {
+    const r = trackRef.current.getBoundingClientRect();
+    const inner = r.width - 4;
+    const i = Math.floor(((clientX - r.left - 2) / inner) * n);
+    return opts[Math.max(0, Math.min(n - 1, i))].value;
+  };
+
+  const onPointerDown = (e) => {
+    setDragging(true);
+    const v0 = segAt(e.clientX);
+    if (v0 !== valueRef.current) onChange(v0);
+    const move = (ev) => {
+      if (!trackRef.current) return;
+      const v = segAt(ev.clientX);
+      if (v !== valueRef.current) onChange(v);
+    };
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   return (
-    <div className="drill-overlay" onClick={onClose}>
-      <div className="drill-panel" onClick={e => e.stopPropagation()}>
-        <div className="drill-head" style={{background: isRisk ? '#7A1E1E' : isOpp ? '#1E5A37' : 'var(--antares-signature-navy)'}}>
-          <button className="drill-close" onClick={onClose}>✕ close</button>
-          <div className="ec section-h-sm" style={{textTransform:'uppercase',letterSpacing:'0.12em',fontSize:11,color:'rgba(255,255,255,0.7)',fontWeight:700}}>
-            {isRisk ? 'Risk Item' : isOpp ? 'Opportunity Item' : 'R&O Item'}
-          </div>
-          <h2>{it.application || it.subCategory || it.project || '—'}</h2>
-          <div className="meta">
-            <span>{it.vendor || '—'}</span>
-            <span>·</span>
-            <span>{it.owner === 'N/A' ? 'Unallocated' : (it.owner || 'Unallocated')}</span>
-            <span>·</span>
-            <span>{it.domain || '—'}</span>
-          </div>
-        </div>
-        <div className="drill-body">
-          <div className="drill-kpi-grid">
-            <div className="drill-kpi"><div className="l">Budget</div><div className="v">{fmt.m2(it.budget)}</div></div>
-            <div className="drill-kpi"><div className="l">YTD Actual</div><div className="v">{fmt.m2(it.actual)}</div></div>
-            <div className="drill-kpi"><div className="l">Forecast</div><div className="v">{fmt.m2(it.forecast)}</div></div>
-            <div className="drill-kpi">
-              <div className="l">Net Opp/Risk</div>
-              <div className={`v ${isRisk ? 'risk' : isOpp ? 'opp' : ''}`}>{Math.abs(it.net) < 1 ? '—' : fmt.signed2(it.net)}</div>
-            </div>
-          </div>
-
-          <div className="section-h" style={{marginBottom:10}}>Classification</div>
-          <table className="tbl" style={{marginBottom:22}}>
-            <tbody>
-              <tr><td style={{width:'30%', fontWeight:600, color:'var(--antares-signature-navy)'}}>Vendor</td><td>{it.vendor || '—'}</td></tr>
-              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Project</td><td>{it.project || '—'}</td></tr>
-              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Application</td><td>{it.application || '—'}</td></tr>
-              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Domain</td><td>{it.domain || '—'}</td></tr>
-              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Domain Owner</td><td>{it.owner === 'N/A' ? 'Unallocated' : (it.owner || '—')}</td></tr>
-              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Category</td><td>{it.category || '—'}</td></tr>
-              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Sub-Category</td><td>{it.subCategory || '—'}</td></tr>
-              <tr><td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Accounting Treatment</td><td>{it.treatment || '—'}</td></tr>
-            </tbody>
-          </table>
-
-          <div className="section-h" style={{marginBottom:10}}>Variance Analysis</div>
-          <table className="tbl" style={{marginBottom: 22}}>
-            <tbody>
-              <tr>
-                <td style={{width:'30%', fontWeight:600, color:'var(--antares-signature-navy)'}}>Risk Component</td>
-                <td className="num neg" style={{textAlign:'left'}}>{Math.abs(it.risk||0) < 1 ? '$0' : fmt.k(it.risk)}</td>
-              </tr>
-              <tr>
-                <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Opportunity Component</td>
-                <td className="num pos" style={{textAlign:'left'}}>{Math.abs(it.opp||0) < 1 ? '$0' : fmt.k(Math.abs(it.opp))}</td>
-              </tr>
-              <tr style={{borderTop:'2px solid var(--antares-signature-navy)'}}>
-                <td style={{fontWeight:700, color:'var(--antares-signature-navy)'}}>Net Position</td>
-                <td className={`num ${isRisk ? 'neg' : isOpp ? 'pos' : 'zero'}`} style={{textAlign:'left', fontWeight:700}}>{Math.abs(it.net) < 1 ? '—' : fmt.signed(it.net)}</td>
-              </tr>
-              <tr>
-                <td style={{fontWeight:600, color:'var(--antares-signature-navy)'}}>Forecast vs Budget</td>
-                <td style={{textAlign:'left'}}>{fmt.signed(it.forecast - it.budget)} ({((it.forecast-it.budget)/it.budget*100).toFixed(2)}%)</td>
-              </tr>
-            </tbody>
-          </table>
-
-          {it.notes && (
-            <>
-              <div className="section-h" style={{marginBottom:10}}>Notes</div>
-              <div className="fs-small" style={{padding:'12px 14px', background:'#FAFAF8', borderLeft:'3px solid ' + (isRisk ? 'var(--risk-red)' : isOpp ? 'var(--opp-green)' : 'var(--antares-bright-blue)'), color:'var(--antares-soft-black)', lineHeight: 1.5}}>
-                {it.notes}
-              </div>
-            </>
-          )}
-        </div>
+    <TweakRow label={label}>
+      <div ref={trackRef} role="radiogroup" onPointerDown={onPointerDown}
+           className={dragging ? 'twk-seg dragging' : 'twk-seg'}>
+        <div className="twk-seg-thumb"
+             style={{ left: `calc(2px + ${idx} * (100% - 4px) / ${n})`,
+                      width: `calc((100% - 4px) / ${n})` }} />
+        {opts.map((o) => (
+          <button key={o.value} type="button" role="radio" aria-checked={o.value === value}>
+            {o.label}
+          </button>
+        ))}
       </div>
+    </TweakRow>
+  );
+}
+
+function TweakSelect({ label, value, options, onChange }) {
+  return (
+    <TweakRow label={label}>
+      <select className="twk-field" value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((o) => {
+          const v = typeof o === 'object' ? o.value : o;
+          const l = typeof o === 'object' ? o.label : o;
+          return <option key={v} value={v}>{l}</option>;
+        })}
+      </select>
+    </TweakRow>
+  );
+}
+
+function TweakText({ label, value, placeholder, onChange }) {
+  return (
+    <TweakRow label={label}>
+      <input className="twk-field" type="text" value={value} placeholder={placeholder}
+             onChange={(e) => onChange(e.target.value)} />
+    </TweakRow>
+  );
+}
+
+function TweakNumber({ label, value, min, max, step = 1, unit = '', onChange }) {
+  const clamp = (n) => {
+    if (min != null && n < min) return min;
+    if (max != null && n > max) return max;
+    return n;
+  };
+  const startRef = React.useRef({ x: 0, val: 0 });
+  const onScrubStart = (e) => {
+    e.preventDefault();
+    startRef.current = { x: e.clientX, val: value };
+    const decimals = (String(step).split('.')[1] || '').length;
+    const move = (ev) => {
+      const dx = ev.clientX - startRef.current.x;
+      const raw = startRef.current.val + dx * step;
+      const snapped = Math.round(raw / step) * step;
+      onChange(clamp(Number(snapped.toFixed(decimals))));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <div className="twk-num">
+      <span className="twk-num-lbl" onPointerDown={onScrubStart}>{label}</span>
+      <input type="number" value={value} min={min} max={max} step={step}
+             onChange={(e) => onChange(clamp(Number(e.target.value)))} />
+      {unit && <span className="twk-num-unit">{unit}</span>}
     </div>
   );
 }
 
-window.DomainOwnersTab = DomainOwnersTab;
-window.RiskOppLogTab = RiskOppLogTab;
+function TweakColor({ label, value, onChange }) {
+  return (
+    <div className="twk-row twk-row-h">
+      <div className="twk-lbl"><span>{label}</span></div>
+      <input type="color" className="twk-swatch" value={value}
+             onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+function TweakButton({ label, onClick, secondary = false }) {
+  return (
+    <button type="button" className={secondary ? 'twk-btn secondary' : 'twk-btn'}
+            onClick={onClick}>{label}</button>
+  );
+}
+
+Object.assign(window, {
+  useTweaks, TweaksPanel, TweakSection, TweakRow,
+  TweakSlider, TweakToggle, TweakRadio, TweakSelect,
+  TweakText, TweakNumber, TweakColor, TweakButton,
+});

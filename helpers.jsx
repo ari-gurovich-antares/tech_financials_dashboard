@@ -1,215 +1,149 @@
-/* ============================================================
-   Antares Capital — Colors & Type tokens
-   Source: Color Palette and Fonts Guidelines (January 2026)
-   ============================================================ */
+// Shared helpers — exposed on window
+const fmt = {
+  m: (n) => {
+    if (n === null || n === undefined || isNaN(n)) return '$0';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(1)}M`;
+    if (abs >= 1e3) return `${sign}$${(abs/1e3).toFixed(0)}K`;
+    return `${sign}$${abs.toFixed(0)}`;
+  },
+  k: (n) => {
+    if (!n) return '$0';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(1)}M`;
+    return `${sign}$${(abs/1e3).toFixed(0)}K`;
+  },
+  // 1-decimal currency: $1.2M / $123.4K / $1,234.6
+  m2: (n) => {
+    if (n === null || n === undefined || isNaN(n)) return '$0.0';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return `${sign}$${(abs/1e6).toFixed(1)}M`;
+    if (abs >= 1e3) return `${sign}$${(abs/1e3).toFixed(1)}K`;
+    return `${sign}$${abs.toFixed(1)}`;
+  },
+  signed2: (n) => {
+    if (!n || Math.abs(n) < 0.005) return '$0.0';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(n);
+    let body;
+    if (abs >= 1e6) body = `$${(abs/1e6).toFixed(1)}M`;
+    else if (abs >= 1e3) body = `$${(abs/1e3).toFixed(1)}K`;
+    else body = `$${abs.toFixed(1)}`;
+    return (n > 0 ? '+' : '-') + body;
+  },
+  pct: (n) => `${(n*100).toFixed(1)}%`,
+  signed: (n) => {
+    if (!n || Math.abs(n) < 1) return '$0';
+    return (n > 0 ? '+' : '') + fmt.m(n);
+  },
+  num: (n) => Math.round(n).toLocaleString('en-US')
+};
 
-/* ---------- Webfonts (Google Fonts) ---------------------------
-   Source Serif 4 — headers, numbers, captions
-   Inter — subheaders, body, footnotes
-   Note: brand wordmark uses ARGENT CF (commercial). The wordmark
-   is treated as a logo asset (PNG/SVG); body type uses the pair
-   above. Default fallbacks: Georgia (serif) / Arial (sans).
----------------------------------------------------------------- */
-@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&family=Inter:wght@300..800&display=swap');
+// Domain owner role labels
+const OWNER_ROLES = {
+  'Devang Shah': 'Asset Mgmt & Data',
+  'Danny Borkowski': 'Infrastructure & Controls',
+  'Dan Royer': 'Finance & Treasury Tech',
+  'John Spencer': 'Credit Technology',
+  'Melissa Tumminia': 'PMO & Enterprise Tech',
+  'Erik Wynkoop': 'Operations Technology',
+  'N/A': 'Unallocated'
+};
 
-:root {
-  /* ---------------- PRIMARY PALETTE ---------------- */
-  --antares-signature-navy: #333C66;        /* PMS 534 C / 648 */
-  --antares-bright-blue:    #6699FF;        /* PMS 279 C — RGB build */
-  --antares-bright-blue-cmyk:#4E7EE3;       /* CMYK printing only */
-  --antares-bright-blue-100:#E5EEFF;        /* tint, PMS 2707 C */
-  --antares-bright-blue-600:#4E7EE3;        /* darker build */
-  --antares-pure-white:     #FFFFFF;
-
-  /* ---------------- EXPANDED PALETTE ---------------- */
-  --antares-olive-gold:     #D9D962;        /* PMS 584 C — sparingly */
-  --antares-stone-gray:     #807E7A;        /* PMS Warm Gray 7 C */
-  --antares-stone-gray-200: #C7C5C1;        /* derived stroke tint */
-  --antares-stone-gray-100: #EBE9E6;        /* PMS Warm Gray 1 C — title bars */
-  --antares-gray-100:       #EBE9E6;        /* alias */
-  --antares-soft-black:     #1C1C1C;
-
-  /* ---------------- GRADIENT STOPS ---------------- */
-  /* Soft Navy / "primary" gradient — three stops */
-  --antares-grad-stop-0:   #4B5E8B;
-  --antares-grad-stop-75:  #202652;
-  --antares-grad-stop-100: #1C213F;
-
-  --antares-gradient-soft-navy: linear-gradient(135deg,
-      var(--antares-grad-stop-0)   0%,
-      var(--antares-grad-stop-75) 75%,
-      var(--antares-grad-stop-100) 100%);
-
-  /* Bright-Blue tint-to-white gradient (secondary chart highlight) */
-  --antares-gradient-bright-tint: linear-gradient(90deg,
-      rgba(102,153,255,0.9) 0%,
-      rgba(102,153,255,0)   100%);
-
-  /* ---------------- SEMANTIC ROLES ---------------- */
-  --color-bg:           var(--antares-pure-white);
-  --color-bg-tint:      var(--antares-bright-blue-100);
-  --color-bg-neutral:   var(--antares-stone-gray-100);
-  --color-bg-dark:      var(--antares-signature-navy);
-  --color-bg-gradient:  var(--antares-gradient-soft-navy);
-
-  --color-fg-1:         var(--antares-soft-black);          /* body */
-  --color-fg-2:         var(--antares-stone-gray);          /* secondary */
-  --color-fg-on-dark:   var(--antares-pure-white);
-  --color-fg-header:    var(--antares-signature-navy);      /* on light */
-  --color-accent:       var(--antares-bright-blue);
-
-  --color-border:       var(--antares-stone-gray-200);
-  --color-border-soft:  rgba(128,126,122,0.25);
-  --color-divider:      var(--antares-stone-gray-100);
-
-  /* Chart priority order (Navy → Bright Blue → Olive → Stone) */
-  --chart-1: var(--antares-signature-navy);
-  --chart-2: var(--antares-bright-blue);
-  --chart-3: var(--antares-olive-gold);
-  --chart-4: var(--antares-stone-gray);
-
-  /* ---------------- TYPE FAMILIES ---------------- */
-  --font-serif:    "Source Serif 4", Georgia, "Times New Roman", serif;
-  --font-sans:     "Inter", Arial, Helvetica, sans-serif;
-  --font-fallback-serif: Georgia, "Times New Roman", serif;  /* default if Source Serif unavailable */
-  --font-fallback-sans:  Arial, Helvetica, sans-serif;       /* default if Inter unavailable */
-
-  /* ---------------- TYPE SCALE ----------------
-     Sizes in px for 1920x1080 slide context;
-     scale down ~0.6x for web body usage.        */
-  --fs-impact:      96px;   /* Impact Statement — short & sharp */
-  --fs-h1:          56px;   /* Header */
-  --fs-h2:          40px;
-  --fs-h3:          28px;
-  --fs-lead:        22px;   /* Lead copy intro */
-  --fs-body:        16px;
-  --fs-small:       14px;
-  --fs-stats:       72px;   /* Big numbers */
-  --fs-caption:     11px;   /* Tracked +200, all-caps */
-
-  /* ---------------- SPACING (8pt grid) ---------------- */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-  --space-8: 64px;
-  --space-9: 96px;
-  --space-10: 128px;
-
-  /* ---------------- RADII ---------------- */
-  /* Antares is restrained: the brand favors squared corners
-     (echoing the geometric "anchor" squares in the graphic
-     system). Cards & buttons use a small radius only. */
-  --radius-0: 0px;
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-pill: 999px;     /* used only for tags / data chips */
-
-  /* ---------------- ELEVATION / SHADOWS ----------------
-     The brand is print-first; shadows are rarely used. When
-     elevation is needed we keep them tight, low-opacity, navy-
-     toned (never warm). */
-  --shadow-1: 0 1px 2px rgba(28,33,63,0.06), 0 1px 1px rgba(28,33,63,0.04);
-  --shadow-2: 0 4px 16px rgba(28,33,63,0.08), 0 1px 2px rgba(28,33,63,0.05);
-  --shadow-focus: 0 0 0 3px rgba(102,153,255,0.35);
+// Tiny SVG icon
+function Icon({ name, size = 14, color = 'currentColor' }) {
+  const paths = {
+    refresh: <path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5" />,
+    upload: <path d="M12 16V4M6 10l6-6 6 6M4 20h16" />,
+    download: <path d="M12 4v12m6-6-6 6-6-6M4 20h16" />,
+    file: <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6" />,
+    sharepoint: <><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>,
+    chevron: <path d="m9 18 6-6-6-6" />,
+    close: <path d="M18 6 6 18M6 6l18 12" />,
+    arrow: <path d="M5 12h14m-6-6 6 6-6 6" />,
+    check: <path d="m20 6-11 11-5-5" />,
+    alert: <><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /></>,
+    trend: <path d="m3 17 6-6 4 4 8-8M14 7h7v7" />,
+    filter: <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    info: <><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v4h1" /></>,
+    grid: <><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></>
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}>
+      {paths[name]}
+    </svg>
+  );
 }
 
-/* ============================================================
-   SEMANTIC TYPE STYLES — apply directly or @extend
-   ============================================================ */
-.t-impact, h1.impact {
-  font-family: var(--font-serif);
-  font-weight: 600;          /* Semi-Bold */
-  font-size: var(--fs-impact);
-  line-height: 1.02;
-  letter-spacing: -0.01em;
-  color: var(--color-fg-header);
+// Sparkline (12 months)
+function Sparkline({ ac, fc, height = 32, width = 120 }) {
+  const all = [...ac, ...fc];
+  const max = Math.max(...all, 1);
+  const w = width / 12;
+  return (
+    <svg width={width} height={height}>
+      {ac.map((v, i) => {
+        const h = Math.max(1, (v / max) * (height - 2));
+        return <rect key={'a'+i} x={i*w + 1} y={height-h} width={w-2} height={h} fill="#333C66" />;
+      })}
+      {fc.map((v, i) => {
+        if (i < ac.filter(x => x > 0).length) return null; // only show forecast for un-actualed months
+        const h = Math.max(1, (v / max) * (height - 2));
+        return <rect key={'f'+i} x={i*w + 1} y={height-h} width={w-2} height={h} fill="#6699FF" opacity="0.55" />;
+      })}
+    </svg>
+  );
 }
 
-.t-h1, h1 {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: var(--fs-h1);
-  line-height: 1.08;
-  letter-spacing: -0.005em;
-  color: var(--color-fg-header);
+// Donut SVG
+function Donut({ items, size = 140, thickness = 22 }) {
+  const total = items.reduce((s, x) => s + Math.abs(x.value), 0) || 1;
+  const r = (size - thickness) / 2;
+  const c = 2 * Math.PI * r;
+  let acc = 0;
+  return (
+    <svg width={size} height={size}>
+      <g transform={`translate(${size/2},${size/2}) rotate(-90)`}>
+        <circle r={r} fill="none" stroke="#EFEDE9" strokeWidth={thickness} />
+        {items.map((it, i) => {
+          const v = Math.abs(it.value) / total;
+          const dash = v * c;
+          const offset = -acc * c;
+          acc += v;
+          return <circle key={i} r={r} fill="none" stroke={it.color} strokeWidth={thickness} strokeDasharray={`${dash} ${c-dash}`} strokeDashoffset={offset} />;
+        })}
+      </g>
+    </svg>
+  );
 }
 
-.t-h2, h2 {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: var(--fs-h2);
-  line-height: 1.12;
-  color: var(--color-fg-header);
+// Global single-sheet XLSX export helper
+function xlsxExport(rows, filename) {
+  if (typeof XLSX === 'undefined') { alert('SheetJS not loaded — please refresh.'); return; }
+  if (!rows || !rows.length) { alert('No data to export.'); return; }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Export');
+  XLSX.writeFile(wb, filename.endsWith('.xlsx') ? filename : filename + '.xlsx');
 }
 
-.t-h3, h3 {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: var(--fs-h3);
-  line-height: 1.2;
-  color: var(--color-fg-header);
+// Small inline export button for table headers
+function ExportBtn({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Export to Excel"
+      style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', background:'#F5F3F0', border:'1px solid #EDECEA', borderRadius:4, cursor:'pointer', fontSize:11, fontWeight:600, color:'#807E7A', fontFamily:'var(--font-sans)' }}
+      onMouseEnter={e => e.currentTarget.style.background='#EDECEA'}
+      onMouseLeave={e => e.currentTarget.style.background='#F5F3F0'}
+    >
+      <Icon name="download" size={11} color="#807E7A" /> Export
+    </button>
+  );
 }
 
-.t-lead {
-  font-family: var(--font-sans);
-  font-weight: 600;          /* Semibold */
-  font-size: var(--fs-lead);
-  line-height: 1.35;
-  color: var(--color-fg-1);
-}
-
-.t-body, p {
-  font-family: var(--font-sans);
-  font-weight: 400;
-  font-size: var(--fs-body);
-  line-height: 1.55;
-  color: var(--color-fg-1);
-  text-wrap: pretty;
-}
-
-.t-small {
-  font-family: var(--font-sans);
-  font-weight: 400;
-  font-size: var(--fs-small);
-  line-height: 1.5;
-  color: var(--color-fg-2);
-}
-
-.t-stats {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: var(--fs-stats);
-  line-height: 1;
-  letter-spacing: -0.01em;
-  color: var(--color-fg-header);
-  font-variant-numeric: lining-nums tabular-nums;
-}
-
-.t-caption, .eyebrow {
-  font-family: var(--font-serif);
-  font-weight: 800;          /* Extra-Bold */
-  font-size: var(--fs-caption);
-  line-height: 1.2;
-  letter-spacing: 0.20em;    /* Tracked +200 */
-  text-transform: lowercase; /* the brand sets captions in lowercase, see PDF p.20 */
-  color: var(--color-fg-2);
-}
-
-/* When set on dark backgrounds */
-.on-dark { color: var(--color-fg-on-dark); }
-.on-dark .t-h1, .on-dark .t-h2, .on-dark .t-h3,
-.on-dark .t-impact, .on-dark .t-stats { color: var(--color-fg-on-dark); }
-.on-dark .t-small, .on-dark .t-caption { color: rgba(255,255,255,0.72); }
-
-/* ============================================================
-   UTILITIES
-   ============================================================ */
-.bg-navy      { background: var(--color-bg-dark); color: var(--color-fg-on-dark); }
-.bg-gradient  { background: var(--color-bg-gradient); color: var(--color-fg-on-dark); }
-.bg-tint      { background: var(--color-bg-tint); }
-.bg-neutral   { background: var(--color-bg-neutral); }
-.bg-white     { background: var(--color-bg); }
+Object.assign(window, { fmt, OWNER_ROLES, Icon, Sparkline, Donut, xlsxExport, ExportBtn });
