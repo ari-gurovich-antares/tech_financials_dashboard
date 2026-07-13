@@ -762,6 +762,37 @@
     console.log('[parse] Back Pocket → flaggedRows=' + _bpRows.length + ', rawNetSum=$' + Math.round(_bpRaw/1000) + 'K, displayedAbsValue=$' + Math.round(Math.abs(_bpRaw)/1000) + 'K');
     summary.backPocket = Math.abs(_bpRaw);
 
+    // ── Auto-detect last closed month & override actual/forecast from monthly columns ──
+    // "Actual Spend" = sum of Jan AC … last month with any non-zero AC across all rows.
+    // "Remaining Forecast" = sum of FC columns for the months after that.
+    // This mirrors what the Finance team sees: closed months → AC, open months → FC.
+    {
+      let lastActMonth = -1;
+      for (const li of lineItems) {
+        for (let m = 0; m < 12; m++) {
+          if ((li.monthlyAC[m] || 0) !== 0) lastActMonth = Math.max(lastActMonth, m);
+        }
+      }
+      if (lastActMonth >= 0) {
+        const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        console.log('[parse] Last closed month (AC):', MONTH_NAMES[lastActMonth], '(index', lastActMonth + ')');
+        for (const li of lineItems) {
+          const acSum = li.monthlyAC.slice(0, lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
+          const fcSum = li.monthlyFC.slice(lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
+          li.actual   = acSum;
+          li.forecast = acSum + fcSum;
+        }
+        // Recompute workbookSubtotal.actual/remaining to match
+        if (workbookSubtotal) {
+          let wsAct = 0, wsFc = 0;
+          for (const li of lineItems) { wsAct += li.actual || 0; wsFc += li.forecast || 0; }
+          workbookSubtotal.actual    = wsAct;
+          workbookSubtotal.forecast  = wsFc;
+          workbookSubtotal.remaining = wsFc - wsAct;
+        }
+      }
+    }
+
     // Aggregate by vendor
     const byV = {};
     for (const li of lineItems) {

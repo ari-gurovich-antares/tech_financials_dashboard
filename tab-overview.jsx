@@ -626,7 +626,7 @@ function OverviewTab({ data }) {
         {[
           { label: 'annual budget',      val: fmt.m(kpi.budget),    sub: '2026 approved budget' },
           { label: 'year-end forecast',  val: fmt.m(kpi.forecast),  sub: 'actuals + remaining forecast' },
-          { label: 'back pocket',        val: 'TBD',                sub: 'non-committed favorable net position' },
+          { label: 'back pocket',        val: fmt.m(backPocket),    sub: 'non-committed favorable net position' },
 
         ].map((k, i) => (
           <div key={i} className="kpi-flip" style={{ borderLeft: i > 0 ? `1px solid ${OV.border}` : 'none', height: 128 }}>
