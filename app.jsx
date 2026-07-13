@@ -259,11 +259,15 @@ function App({ data: initialData }) {
       };
       const b      = byVendor[v];
       const months = PERIOD_RANGES[filters.period].months;
-      const sumP   = arr => months.reduce((s, i) => s + (arr[i] || 0), 0);
-      b.budget  += li.budget * (months.length / 12);
-      b.actual  += sumP(li.monthlyAC);
-      const fcMonthly = sumP(li.monthlyFC);
-      b.forecast += fcMonthly > 0 ? fcMonthly : (li.forecast || 0);
+      // Mirror parse-excel.js split: AC for Jan–May (≤4), FC for Jun–Dec (>4)
+      const LAST_ACT_MONTH = 4;
+      const actMonths = months.filter(m => m <= LAST_ACT_MONTH);
+      const fcMonths  = months.filter(m => m >  LAST_ACT_MONTH);
+      const acPart = actMonths.reduce((s, i) => s + (li.monthlyAC[i] || 0), 0);
+      const fcPart = fcMonths.reduce((s,  i) => s + (li.monthlyFC[i] || 0), 0);
+      b.budget   += li.budget * (months.length / 12);
+      b.actual   += acPart;
+      b.forecast += acPart + fcPart;
       b.risk    += li.risk;
       b.opp     += li.opp;
       b.net     += li.net;
@@ -370,11 +374,12 @@ function App({ data: initialData }) {
 
 
       {activeTab === 'vendors' && (
-        <div className="content"><VendorsTab data={ctx} view={filters.view} /></div>
+        <div className="content"><VendorsTab key={uploadKey} data={ctx} view={filters.view} /></div>
       )}
 
       {uploadOpen && (
         <UploadModal
+          key={uploadKey}
           onClose={() => setUploadOpen(false)}
           onUpload={handleUpload}
           lastRefresh={sourceInfo ? sourceInfo.timestamp : null}

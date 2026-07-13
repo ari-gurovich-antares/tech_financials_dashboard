@@ -171,8 +171,11 @@ function VendorDetail({ vendor: v, onClose }) {
       const cat = li.spendCategory || li.subCategory || li.category || '(Uncategorized)';
       if (!rollup.has(cat)) rollup.set(cat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0, items:[] });
       const g = rollup.get(cat);
-      const ac = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-      const fc = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
+      // Mirror parse-excel.js split: AC for Jan–May (≤4), FC for Jun–Dec (>4)
+      const LAST_ACT_MONTH = 4;
+      const ac     = (li.monthlyAC||[]).slice(0, LAST_ACT_MONTH + 1).reduce((s,x)=>s+x,0);
+      const fcOnly = (li.monthlyFC||[]).slice(LAST_ACT_MONTH + 1).reduce((s,x)=>s+x,0);
+      const fc     = ac + fcOnly;
       g.items.push(li); g.budget += li.budget||0; g.actual += ac; g.forecast += fc;
       g.risk += li.risk||0; g.opp += li.opp||0; g.net += li.net||0;
     }
@@ -404,8 +407,10 @@ function VendorDetail({ vendor: v, onClose }) {
                           </thead>
                           <tbody>
                             {cg.items.map((li, idx) => {
-                              const acLI = (li.monthlyAC||[]).reduce((s,x)=>s+x,0);
-                              const fcLI = (li.monthlyFC||[]).reduce((s,x)=>s+x,0);
+                              const LAST_ACT = 4;
+                              const acLI   = (li.monthlyAC||[]).slice(0, LAST_ACT+1).reduce((s,x)=>s+x,0);
+                              const fcOnly = (li.monthlyFC||[]).slice(LAST_ACT+1).reduce((s,x)=>s+x,0);
+                              const fcLI   = acLI + fcOnly; // full year forecast
                               return (
                                 <tr key={idx} style={{ borderTop:'1px solid #E4E6F2', background: idx%2===0?'#F6F7FB':'#F0F1F8' }}>
                                   <td style={{ padding:'8px 12px 8px 32px', color:'#1A1F3C' }}>
@@ -414,8 +419,8 @@ function VendorDetail({ vendor: v, onClose }) {
                                   </td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:li.budget>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{li.budget>0?fmt.k(li.budget):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:acLI>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{acLI>0?fmt.k(acLI):'—'}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(fcOnly)}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(fcLI)}</td>
-                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(acLI+fcLI)}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:(li.risk||0)>100?'#C03A3A':'#D8D6D2' }}>{(li.risk||0)>100?fmt.k(li.risk):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:(li.opp||0)<-100?'#1F7A4D':'#D8D6D2' }}>{(li.opp||0)<-100?fmt.k(Math.abs(li.opp)):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', fontWeight:Math.abs(li.net||0)>100?600:400, color:(li.net||0)>100?'#C03A3A':(li.net||0)<-100?'#1F7A4D':'#D8D6D2' }}>
@@ -433,8 +438,8 @@ function VendorDetail({ vendor: v, onClose }) {
                               <td style={{ padding:'8px 12px 8px 32px', fontWeight:700, color:'#333C66', fontSize:11 }}>Subtotal</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.budget>0?fmt.k(cg.budget):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.actual>0?fmt.k(cg.actual):'—'}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast - cg.actual)}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast)}</td>
-                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.risk>100?'#C03A3A':'#D8D6D2' }}>{cg.risk>100?fmt.k(cg.risk):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.opp<-100?'#1F7A4D':'#D8D6D2' }}>{cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2' }}>{Math.abs(cg.net)>100?fmt.signed(cg.net):'—'}</td>
                               <td />
@@ -765,7 +770,7 @@ function VendorsTab({ data }) {
         ...v,
         budget:    fi.reduce((s,li) => s + (li.budget   || 0), 0),
         forecast:  fi.reduce((s,li) => s + (li.forecast || 0), 0),
-        actual:    fi.reduce((s,li) => s + ((li.monthlyAC||[]).reduce((a,x)=>a+x,0)), 0),
+        actual:    fi.reduce((s,li) => s + (li.actual || 0), 0),
         risk:      fi.reduce((s,li) => s + (li.risk || 0), 0),
         opp:       fi.reduce((s,li) => s + (li.opp  || 0), 0),
         net:       fi.reduce((s,li) => s + (li.net  || 0), 0),

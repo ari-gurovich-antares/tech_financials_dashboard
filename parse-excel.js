@@ -767,15 +767,11 @@
     // "Remaining Forecast" = sum of FC columns for the months after that.
     // This mirrors what the Finance team sees: closed months → AC, open months → FC.
     {
-      let lastActMonth = -1;
-      for (const li of lineItems) {
-        for (let m = 0; m < 12; m++) {
-          if ((li.monthlyAC[m] || 0) !== 0) lastActMonth = Math.max(lastActMonth, m);
-        }
-      }
-      if (lastActMonth >= 0) {
+      // Hardcoded split: Actuals = Jan–May (indices 0–4), Forecast = Jun–Dec (indices 5–11).
+      const lastActMonth = 4; // May
+      {
         const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        console.log('[parse] Last closed month (AC):', MONTH_NAMES[lastActMonth], '(index', lastActMonth + ')');
+        console.log('[parse] Fixed closed-month split: Actuals Jan–' + MONTH_NAMES[lastActMonth] + ', Forecast Jun–Dec');
         for (const li of lineItems) {
           const acSum = li.monthlyAC.slice(0, lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
           const fcSum = li.monthlyFC.slice(lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
