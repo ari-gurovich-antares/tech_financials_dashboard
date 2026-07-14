@@ -379,7 +379,6 @@ function App({ data: initialData }) {
 
       {uploadOpen && (
         <UploadModal
-          key={uploadKey}
           onClose={() => setUploadOpen(false)}
           onUpload={handleUpload}
           lastRefresh={sourceInfo ? sourceInfo.timestamp : null}

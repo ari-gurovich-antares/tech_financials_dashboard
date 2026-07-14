@@ -381,10 +381,10 @@ function VendorDetail({ vendor: v, onClose }) {
                           <div style={{ fontSize:11, color:'#807E7A', marginTop:5, marginLeft:17, lineHeight:1.45, maxWidth:440 }}>{cg.note}</div>
                         )}
                       </div>
-                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actual Spend', cg.actual>0?fmt.k(cg.actual):'—'], ['Rem. Forecast', fmt.k(cg.forecast)], ['Act+FC', fmt.k(cg.actual+cg.forecast)], ['Consumption', cons!==null?`${cons.toFixed(0)}%`:'—'], ['Risk', cg.risk>100?fmt.k(cg.risk):'—'], ['Opp', cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'], ['Net R/(O)', Math.abs(cg.net)>100?fmt.signed(cg.net):'—']].map(([lbl,val],vi) => (
+                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actual Spend', cg.actual>0?fmt.k(cg.actual):'—'], ['Rem. Forecast', fmt.k(cg.forecast)], ['Act+FC', fmt.k(cg.actual+cg.forecast)], ['Budget Consumption', cons!==null?`${cons.toFixed(0)}%`:'—'], ['Risk', cg.risk>100?fmt.k(cg.risk):'—'], ['Opp', cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'], ['Net R/(O)', Math.abs(cg.net)>100?fmt.signed(cg.net):'—']].map(([lbl,val],vi) => (
                         <div key={lbl} style={{ textAlign:'right', minWidth:52, flexShrink:0 }}>
                           <div style={{ fontSize:8, color:'#B0ADA9', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3, whiteSpace:'nowrap' }}>{lbl}</div>
-                          <div style={{ fontSize:12, fontWeight:700, color: lbl==='Consumption'&&cons!==null ? (cons>100?'#C03A3A':cons>85?'#96600A':'#333C66') : lbl==='Risk'&&cg.risk>100 ? '#C03A3A' : lbl==='Opp'&&cg.opp<-100 ? '#1F7A4D' : lbl==='Net R/(O)' ? (cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2') : '#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{val}</div>
+                          <div style={{ fontSize:12, fontWeight:700, color: lbl==='Budget Consumption'&&cons!==null ? (cons>100?'#C03A3A':cons>85?'#96600A':'#333C66') : lbl==='Risk'&&cg.risk>100 ? '#C03A3A' : lbl==='Opp'&&cg.opp<-100 ? '#1F7A4D' : lbl==='Net R/(O)' ? (cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2') : '#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{val}</div>
                         </div>
                       ))}
                     </div>
@@ -400,6 +400,7 @@ function VendorDetail({ vendor: v, onClose }) {
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Actual Spend</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Remaining Forecast</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Act+FC</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Risk</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Opp</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Net R/(O)</th>
                               <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes</th>
@@ -440,6 +441,7 @@ function VendorDetail({ vendor: v, onClose }) {
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.actual>0?fmt.k(cg.actual):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast - cg.actual)}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast)}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.risk>100?'#C03A3A':'#D8D6D2' }}>{cg.risk>100?fmt.k(cg.risk):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.opp<-100?'#1F7A4D':'#D8D6D2' }}>{cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2' }}>{Math.abs(cg.net)>100?fmt.signed(cg.net):'—'}</td>
                               <td />
@@ -506,12 +508,15 @@ function VendorTable({ vendors, onSelect, selected }) {
         const subMap = catMap.get(cat);
         if (!subMap.has(subCat)) subMap.set(subCat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0 });
         const g = subMap.get(subCat);
-        g.budget   += li.budget   || 0;
-        g.actual   += li.actual   || 0;
-        g.forecast += li.forecast || 0;
-        g.risk     += li.risk     || 0;
-        g.opp      += li.opp      || 0;
-        g.net      += li.net      || 0;
+        const _LA = 4;
+        const _ac = (li.monthlyAC||[]).slice(0,_LA+1).reduce((s,x)=>s+x,0);
+        const _fc = _ac + (li.monthlyFC||[]).slice(_LA+1).reduce((s,x)=>s+x,0);
+        g.budget   += li.budget || 0;
+        g.actual   += _ac;
+        g.forecast += _fc;
+        g.risk     += li.risk || 0;
+        g.opp      += li.opp  || 0;
+        g.net      += li.net  || 0;
       }
 
       const catList = [];
@@ -542,7 +547,7 @@ function VendorTable({ vendors, onSelect, selected }) {
     <th onClick={col?()=>toggleSort(col):undefined}
       style={{ padding:'8px 10px', fontSize:10, fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase',
         color:'#6699FF', background:'#F4F5FA', whiteSpace:'nowrap', cursor:col?'pointer':'default',
-        textAlign:right?'right':'left', userSelect:'none', borderBottom:'2px solid #EDECEA' }}>
+        textAlign:'left', userSelect:'none', borderBottom:'2px solid #EDECEA' }}>
       {children}{col&&<SI col={col}/>}
     </th>
   );
@@ -768,9 +773,9 @@ function VendorsTab({ data }) {
       });
       return {
         ...v,
-        budget:    fi.reduce((s,li) => s + (li.budget   || 0), 0),
-        forecast:  fi.reduce((s,li) => s + (li.forecast || 0), 0),
-        actual:    fi.reduce((s,li) => s + (li.actual || 0), 0),
+        budget:    fi.reduce((s,li) => s + (li.budget || 0), 0),
+        actual:    fi.reduce((s,li) => { const a4=(li.monthlyAC||[]).slice(0,5).reduce((s,x)=>s+x,0); return s+a4; }, 0),
+        forecast:  fi.reduce((s,li) => { const a4=(li.monthlyAC||[]).slice(0,5).reduce((s,x)=>s+x,0); const f6=(li.monthlyFC||[]).slice(5).reduce((s,x)=>s+x,0); return s+a4+f6; }, 0),
         risk:      fi.reduce((s,li) => s + (li.risk || 0), 0),
         opp:       fi.reduce((s,li) => s + (li.opp  || 0), 0),
         net:       fi.reduce((s,li) => s + (li.net  || 0), 0),
@@ -883,108 +888,109 @@ function VendorRisksOppsChart({ vendors, n = 10, onSelect }) {
 
   if (top.length === 0) return null;
 
+  const LABEL_W = 180;
+
   return (
-    <div className="card" style={{ padding: '24px 28px', marginBottom: 20 }}>
+    <div className="card" style={{ padding: '32px 44px 24px', marginBottom: 20 }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 700, color: '#1A1F3C', marginBottom: 3 }}>
-            YTD Risks &amp; Opportunities by Vendor
+          <div style={{ fontFamily: 'var(--font-serif)', fontWeight: 700, fontSize: 16, color: '#1A1F3C', marginBottom: 3 }}>
+            Top 10 Vendors — YTD Risk &amp; Opportunity
           </div>
-          <div style={{ fontSize: 11, color: '#9E9B97' }}>Net risk/opportunity by vendor · sorted by net descending</div>
+          <div style={{ fontSize: 12, color: '#9E9B97', marginTop: 5 }}>Gross downside exposure and favorable upside by vendor · sorted by net descending</div>
         </div>
-        <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#807E7A', flexShrink: 0, alignItems: 'center' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 12, height: 10, background: '#C03A3A', display: 'inline-block', borderRadius: 1 }}></span>
-            risk (unfavorable)
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 12, height: 10, background: '#1F7A4D', display: 'inline-block', borderRadius: 1 }}></span>
-            opp (favorable)
-          </span>
+        <div style={{ display: 'flex', gap: 20, alignItems: 'center', paddingTop: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 10, height: 10, background: '#1F7A4D', borderRadius: 1 }} />
+            <span style={{ fontSize: 11, color: '#807E7A' }}>← Opportunity</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 10, height: 10, background: '#C03A3A', borderRadius: 1 }} />
+            <span style={{ fontSize: 11, color: '#807E7A' }}>Risk →</span>
+          </div>
         </div>
       </div>
 
-      {/* Axis labels */}
-      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 110px', gap: 12, marginBottom: 4 }}>
-        <div />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', fontSize: 10, color: '#B0ADA9', marginLeft: 48 }}>
-          <span style={{ textAlign: 'right', paddingRight: 8 }}>← unfavorable (risk)</span>
-          <span style={{ textAlign: 'left', paddingLeft: 8 }}>favorable (opp) →</span>
-        </div>
-        <div />
+      {/* Axis header */}
+      <div style={{ display: 'flex', marginBottom: 4, marginLeft: LABEL_W, marginRight: 90 }}>
+        <div style={{ flex: 1, textAlign: 'right', paddingRight: 8, fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#1F7A4D', fontWeight: 600 }}>← opportunity</div>
+        <div style={{ width: 2, flexShrink: 0 }} />
+        <div style={{ flex: 1, paddingLeft: 8, fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#C03A3A', fontWeight: 600 }}>risk →</div>
       </div>
+      <div style={{ height: 1, background: '#EDECEA', marginLeft: LABEL_W, marginRight: 90 }} />
 
       {/* Rows */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {top.map((v, i) => {
-          const risk = v.risk || 0;
-          const opp  = Math.abs(v.opp || 0);
-          const net  = v.net || 0;
-          const riskPct = max > 0 ? (risk / max) * 100 : 0;
-          const oppPct  = max > 0 ? (opp  / max) * 100 : 0;
-          const netIsRisk = net > 100;
-          const netIsOpp  = net < -100;
+      {top.map((v, i) => {
+        const risk = v.risk || 0;
+        const opp  = Math.abs(v.opp || 0);
+        const net  = v.net || 0;
+        const riskPct = max > 0 ? (risk / max) * 80 : 0;
+        const oppPct  = max > 0 ? (opp  / max) * 80 : 0;
+        const netIsRisk = net > 100;
+        const netIsOpp  = net < -100;
+        const isSel = hoveredVendor === v.vendor;
 
-          return (
-            <div
-              key={v.vendor}
-              onClick={() => onSelect && onSelect(v)}
-              onMouseEnter={() => setHoveredVendor(v.vendor)}
-              onMouseLeave={() => setHoveredVendor(null)}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '180px 1fr 110px',
-                alignItems: 'center',
-                gap: 12,
-                padding: '8px 8px',
-                borderBottom: i < top.length - 1 ? '1px solid #F2F0EE' : 'none',
-                cursor: onSelect ? 'pointer' : 'default',
-                borderRadius: 4,
-                background: hoveredVendor === v.vendor ? '#F4F6FF' : 'transparent',
-                transition: 'background 0.12s',
-              }}
-            >
-              {/* Vendor name */}
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1F3C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.vendor}>
-                {v.vendor}
-              </span>
-
-              {/* Diverging bars */}
-              <div style={{ display: 'grid', gridTemplateColumns: '44px calc(50% + 4px) calc(50% - 48px) 44px', gap: 0, alignItems: 'center', height: 28 }}>
-                {/* Risk label */}
-                <span style={{ fontSize: 9, fontWeight: 700, color: '#C03A3A', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', textAlign: 'right', paddingRight: 4, opacity: risk > 100 ? 1 : 0 }}>{risk > 100 ? fmt.k(risk) : ''}</span>
-                {/* Risk bar (right-aligned) */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', height: 28, paddingRight: 1 }}>
-                  {risk > 100 && <div style={{ width: `${riskPct}%`, height: 20, background: '#C03A3A', borderRadius: '3px 0 0 3px', flexShrink: 0 }} />}
-                </div>
-                {/* Opp bar (left-aligned) */}
-                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', height: 28, paddingLeft: 1, borderLeft: '1px solid #D0CEC8' }}>
-                  {opp > 100 && <div style={{ width: `${oppPct}%`, height: 20, background: '#1F7A4D', borderRadius: '0 3px 3px 0', flexShrink: 0 }} />}
-                </div>
-                {/* Opp label */}
-                <span style={{ fontSize: 9, fontWeight: 700, color: '#1F7A4D', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', paddingLeft: 4, opacity: opp > 100 ? 1 : 0 }}>{opp > 100 ? fmt.k(opp) : ''}</span>
-              </div>
-
-              {/* Net value */}
-              <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                <span style={{ fontSize: 10, color: '#B0ADA9', marginRight: 3 }}>Net</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: netIsRisk ? '#C03A3A' : netIsOpp ? '#1F7A4D' : '#9E9B97', fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.abs(net) > 100 ? fmt.signed2(net) : '—'}
-                </span>
-              </div>
+        return (
+          <div
+            key={v.vendor}
+            onClick={() => onSelect && onSelect(v)}
+            onMouseEnter={() => setHoveredVendor(v.vendor)}
+            onMouseLeave={() => setHoveredVendor(null)}
+            style={{
+              display: 'flex', alignItems: 'center', height: 56,
+              borderBottom: '1px solid #F0EEEB',
+              cursor: onSelect ? 'pointer' : 'default',
+              background: isSel ? '#F5F4F1' : 'transparent',
+              transition: 'background 0.12s',
+              marginLeft: -44, marginRight: -44,
+              paddingLeft: 44, paddingRight: 44,
+            }}
+          >
+            {/* Vendor label */}
+            <div style={{ width: LABEL_W, flexShrink: 0, fontSize: 13, fontWeight: isSel ? 600 : 400, color: isSel ? '#1A1F3C' : '#3C3A36', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }} title={v.vendor}>
+              {v.vendor}
+              {isSel && <span style={{ fontSize: 9, color: '#1A1F3C', opacity: 0.5 }}>▾</span>}
             </div>
-          );
-        })}
-      </div>
 
-      {/* Center $0 label */}
-      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 110px', gap: 12, marginTop: 6 }}>
-        <div />
-        <div style={{ position: 'relative', fontSize: 10, color: '#B0ADA9' }}>
-          <span style={{ position: 'absolute', left: 'calc(50% + 48px)', transform: 'translateX(-50%)' }}>$0</span>
+            {/* Opportunity — green, extends left */}
+            <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingRight: 3 }}>
+              {opp > 100 && (<>
+                <div style={{ fontSize: 12, color: '#1F7A4D', fontVariantNumeric: 'tabular-nums' }}>{fmt.k(opp)}</div>
+                <div style={{ height: 22, width: `${oppPct}%`, background: '#1F7A4D', borderRadius: '3px 0 0 3px', transition: 'width 0.3s ease' }} />
+              </>)}
+            </div>
+
+            <div style={{ width: 2, height: 40, background: '#D4D2CE', flexShrink: 0 }} />
+
+            {/* Risk — red, extends right */}
+            <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 6, paddingLeft: 3 }}>
+              {risk > 100 && (<>
+                <div style={{ height: 22, width: `${riskPct}%`, background: '#C03A3A', borderRadius: '0 3px 3px 0', transition: 'width 0.3s ease' }} />
+                <div style={{ fontSize: 12, color: '#C03A3A', fontVariantNumeric: 'tabular-nums' }}>{fmt.k(risk)}</div>
+              </>)}
+              {risk <= 100 && opp <= 100 && <span style={{ fontSize: 12, color: '#C8C6C2', paddingLeft: 4 }}>—</span>}
+            </div>
+
+            {/* Net */}
+            <div style={{ width: 90, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 10, color: '#B0ADA9', marginRight: 3 }}>Net</span>
+              <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netIsRisk ? '#C03A3A' : netIsOpp ? '#1F7A4D' : '#9E9B97' }}>
+                {Math.abs(net) > 100 ? fmt.signed2(net) : '—'}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Footer totals */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 32, alignItems: 'center', paddingTop: 14, marginTop: 6, borderTop: '1px solid #EDECEA' }}>
+        <div style={{ fontSize: 11, color: '#807E7A' }}>
+          Total Opportunity: <span style={{ color: '#1F7A4D', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt.m(top.reduce((s,v) => s + Math.abs(v.opp||0), 0))}</span>
         </div>
-        <div />
+        <div style={{ fontSize: 11, color: '#807E7A' }}>
+          Total Risk: <span style={{ color: '#C03A3A', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt.m(top.reduce((s,v) => s + (v.risk||0), 0))}</span>
+        </div>
       </div>
     </div>
   );
@@ -1059,17 +1065,35 @@ function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
               {/* Bars */}
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: BAR_H, width: '100%', justifyContent: 'center' }}>
                 {/* Bar 1: Budget */}
-                <div style={{ width: '38%', height: budgetH, background: '#333C66', borderRadius: '3px 3px 0 0', minHeight: budget > 0 ? 2 : 0, transition: 'height 0.3s' }} title={`Budget: ${fmt.k(budget)}`} />
+                <div style={{ width: '38%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', height: BAR_H }}>
+                  <span style={{ fontSize:8, fontWeight:700, color:'#333C66', marginBottom:3, fontVariantNumeric:'tabular-nums', letterSpacing:'0.02em' }}>{fmt.m2(budget)}</span>
+                  <div style={{ width:'100%', height: budgetH, background: '#333C66', borderRadius: '3px 3px 0 0', minHeight: budget > 0 ? 2 : 0, transition: 'height 0.3s', display:'flex', alignItems:'flex-start', justifyContent:'center', paddingTop:4, overflow:'hidden' }} title={`Budget: ${fmt.k(budget)}`}>
+                    {budgetH > 18 && <span style={{ fontSize:8, fontWeight:700, color:'rgba(255,255,255,0.7)', fontVariantNumeric:'tabular-nums', letterSpacing:'0.02em' }}>{fmt.m2(budget)}</span>}
+                  </div>
+                </div>
                 {/* Bar 2: Stacked Actual + Remaining */}
-                <div style={{ width: '38%', height: actualsH + remainH, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', borderRadius: '3px 3px 0 0', overflow: 'hidden', minHeight: (actuals + remaining) > 0 ? 2 : 0 }}>
-                  <div style={{ height: remainH, background: '#E8873A', flexShrink: 0 }} title={`Remaining Forecast: ${fmt.k(remaining)}`} />
-                  <div style={{ height: actualsH, background: '#6699FF', flexShrink: 0 }} title={`Actual Spend: ${fmt.k(actuals)}`} />
+                <div style={{ width: '38%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', height: BAR_H }}>
+                  <span style={{ fontSize:8, fontWeight:700, color:'#1A1F3C', marginBottom:3, fontVariantNumeric:'tabular-nums', letterSpacing:'0.02em' }}>{fmt.m2(actuals + remaining)}</span>
+                  <div style={{ width:'100%', display:'flex', flexDirection:'column', justifyContent:'flex-end', borderRadius:'3px 3px 0 0', overflow:'hidden', minHeight:(actuals+remaining)>0?2:0 }}>
+                    {remaining > 0 && (
+                      <div style={{ background:'#E8873A', display:'flex', flexDirection:'column', alignItems:'center' }} title={`Remaining Forecast: ${fmt.k(remaining)}`}>
+                        <span style={{ fontSize:8, fontWeight:700, color:'#E8873A', fontVariantNumeric:'tabular-nums', padding:'2px 0', whiteSpace:'nowrap' }}>{fmt.m2(remaining)}</span>
+                        <div style={{ width:'100%', height: remainH, background:'#E8873A', flexShrink:0 }} />
+                      </div>
+                    )}
+                    {actuals > 0 && (
+                      <div style={{ background:'#6699FF', display:'flex', flexDirection:'column', alignItems:'center' }} title={`Actual Spend: ${fmt.k(actuals)}`}>
+                        <span style={{ fontSize:8, fontWeight:700, color:'#fff', fontVariantNumeric:'tabular-nums', padding:'2px 0', whiteSpace:'nowrap' }}>{fmt.m2(actuals)}</span>
+                        <div style={{ width:'100%', height: actualsH, background:'#6699FF', flexShrink:0 }} />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
               {/* Baseline */}
               <div style={{ width: '100%', height: 1, background: '#EDECEA', margin: '4px 0' }} />
               {/* Label */}
-              <div style={{ fontSize: 9, fontWeight: 600, color: '#807E7A', textAlign: 'center', lineHeight: 1.3, marginTop: 4, wordBreak: 'break-word' }}>
+              <div style={{ fontSize: 9, fontWeight: 600, color: '#807E7A', textAlign: 'center', lineHeight: 1.3, marginTop: 2, wordBreak: 'break-word' }}>
                 {v.vendor.length > 16 ? v.vendor.slice(0, 15) + '…' : v.vendor}
               </div>
             </div>

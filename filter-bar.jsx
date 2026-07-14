@@ -175,14 +175,19 @@ function filterLineItems(lineItems, f) {
 function aggregate(lineItems, period, view) {
   const months = PERIOD_RANGES[period].months;
   const sumMonths = (arr) => months.reduce((s,i)=>s+(arr[i]||0), 0);
+  const LAST_ACT_MONTH = 4; // May — mirror parse-excel.js split
+  const actMonths = months.filter(m => m <= LAST_ACT_MONTH);
+  const fcMonths  = months.filter(m => m >  LAST_ACT_MONTH);
 
   let actualTotal = 0, forecastTotal = 0, riskTotal = 0, oppTotal = 0, budgetTotal = 0;
   const monthlyACTotal = new Array(12).fill(0);
   const monthlyFCTotal = new Array(12).fill(0);
 
   for (const li of lineItems) {
-    actualTotal += sumMonths(li.monthlyAC);
-    forecastTotal += sumMonths(li.monthlyFC);
+    const acPart = actMonths.reduce((s,i)=>s+(li.monthlyAC[i]||0), 0);
+    const fcPart = fcMonths.reduce((s,i)=>s+(li.monthlyFC[i]||0), 0);
+    actualTotal   += acPart;
+    forecastTotal += acPart + fcPart;
     // Risk/Opp from monthly distribution restricted to period
     const ro = sumMonths(li.monthlyOR);
     if (ro > 0) oppTotal += ro;
