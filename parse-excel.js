@@ -766,26 +766,24 @@
     // "Actual Spend" = sum of Jan AC … last month with any non-zero AC across all rows.
     // "Remaining Forecast" = sum of FC columns for the months after that.
     // This mirrors what the Finance team sees: closed months → AC, open months → FC.
+    let lastActMonth = 4; // May — hardcoded; update when close cycle advances
     {
       // Hardcoded split: Actuals = Jan–May (indices 0–4), Forecast = Jun–Dec (indices 5–11).
-      const lastActMonth = 4; // May
-      {
-        const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        console.log('[parse] Fixed closed-month split: Actuals Jan–' + MONTH_NAMES[lastActMonth] + ', Forecast Jun–Dec');
-        for (const li of lineItems) {
-          const acSum = li.monthlyAC.slice(0, lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
-          const fcSum = li.monthlyFC.slice(lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
-          li.actual   = acSum;
-          li.forecast = acSum + fcSum;
-        }
-        // Recompute workbookSubtotal.actual/remaining to match
-        if (workbookSubtotal) {
-          let wsAct = 0, wsFc = 0;
-          for (const li of lineItems) { wsAct += li.actual || 0; wsFc += li.forecast || 0; }
-          workbookSubtotal.actual    = wsAct;
-          workbookSubtotal.forecast  = wsFc;
-          workbookSubtotal.remaining = wsFc - wsAct;
-        }
+      const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      console.log('[parse] Fixed closed-month split: Actuals Jan–' + MONTH_NAMES[lastActMonth] + ', Forecast Jun–Dec');
+      for (const li of lineItems) {
+        const acSum = li.monthlyAC.slice(0, lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
+        const fcSum = li.monthlyFC.slice(lastActMonth + 1).reduce((s, v) => s + (v || 0), 0);
+        li.actual   = acSum;
+        li.forecast = acSum + fcSum;
+      }
+      // Recompute workbookSubtotal.actual/remaining to match
+      if (workbookSubtotal) {
+        let wsAct = 0, wsFc = 0;
+        for (const li of lineItems) { wsAct += li.actual || 0; wsFc += li.forecast || 0; }
+        workbookSubtotal.actual    = wsAct;
+        workbookSubtotal.forecast  = wsFc;
+        workbookSubtotal.remaining = wsFc - wsAct;
       }
     }
 
@@ -854,7 +852,7 @@
     };
 
     return {
-      summary, vendors, domainOwners, riskOppLog, lineItems, lookups, workbookSubtotal,
+      summary, vendors, domainOwners, riskOppLog, lineItems, lookups, workbookSubtotal, lastActMonth,
       // rowScope: documents the row range used for all calculations.
       // "auto" = formula was read from the SUBTOTAL cell; "fallback" = budget-sum matching.
       // "none" = no SUBTOTAL row found; all rows processed.

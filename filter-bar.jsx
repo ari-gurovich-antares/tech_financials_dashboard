@@ -175,7 +175,7 @@ function filterLineItems(lineItems, f) {
 function aggregate(lineItems, period, view) {
   const months = PERIOD_RANGES[period].months;
   const sumMonths = (arr) => months.reduce((s,i)=>s+(arr[i]||0), 0);
-  const LAST_ACT_MONTH = 4; // May — mirror parse-excel.js split
+  const LAST_ACT_MONTH = 4; // May — hardcoded; update when close cycle advances
   const actMonths = months.filter(m => m <= LAST_ACT_MONTH);
   const fcMonths  = months.filter(m => m >  LAST_ACT_MONTH);
 

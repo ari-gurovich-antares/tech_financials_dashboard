@@ -224,6 +224,7 @@ function App({ data: initialData }) {
     }
     parsedData._bootSource = 'uploaded';
     parsedData._parsedAt = new Date().toISOString();
+    window.__lastActMonth = typeof parsedData.lastActMonth === 'number' ? parsedData.lastActMonth : 4;
     setData(parsedData);
     setUploadKey(k => k + 1);
     console.log('[upload] setData + setUploadKey dispatched');
@@ -259,8 +260,7 @@ function App({ data: initialData }) {
       };
       const b      = byVendor[v];
       const months = PERIOD_RANGES[filters.period].months;
-      // Mirror parse-excel.js split: AC for Jan–May (≤4), FC for Jun–Dec (>4)
-      const LAST_ACT_MONTH = 4;
+      const LAST_ACT_MONTH = (typeof data.lastActMonth === 'number' && data.lastActMonth >= 0) ? data.lastActMonth : 4;
       const actMonths = months.filter(m => m <= LAST_ACT_MONTH);
       const fcMonths  = months.filter(m => m >  LAST_ACT_MONTH);
       const acPart = actMonths.reduce((s, i) => s + (li.monthlyAC[i] || 0), 0);
@@ -359,6 +359,10 @@ function App({ data: initialData }) {
           onClick={() => setActiveTab('vendors')}
         >Vendors</button>
         <button
+          className={`tab${activeTab === '57' ? ' active' : ''}`}
+          onClick={() => setActiveTab('57')}
+        >{typeof NM_LABEL !== 'undefined' ? NM_LABEL : '5+7'} Tracking</button>
+        <button
           className={`tab${activeTab === 'guide' ? ' active' : ''}`}
           onClick={() => setActiveTab('guide')}
         >User Guide</button>
@@ -374,7 +378,10 @@ function App({ data: initialData }) {
 
 
       {activeTab === 'vendors' && (
-        <div className="content"><VendorsTab key={uploadKey} data={ctx} view={filters.view} /></div>
+        <div className="content"><VendorsTab data={ctx} view={filters.view} /></div>
+      )}
+      {activeTab === '57' && (
+        <div className="content"><Tab57 key={uploadKey} data={ctx} /></div>
       )}
 
       {uploadOpen && (
@@ -458,6 +465,7 @@ function App({ data: initialData }) {
       console.warn('[boot] Using static financials.json fallback — xlsx and localStorage both unavailable');
     }
     const root = ReactDOM.createRoot(document.getElementById('app'));
+    window.__lastActMonth = typeof data.lastActMonth === 'number' ? data.lastActMonth : 4;
     root.render(<App data={data} />);
   } catch(err) {
     document.getElementById('app').innerHTML =

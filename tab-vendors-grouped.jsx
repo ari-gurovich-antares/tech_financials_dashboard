@@ -172,7 +172,7 @@ function VendorDetail({ vendor: v, onClose }) {
       if (!rollup.has(cat)) rollup.set(cat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0, items:[] });
       const g = rollup.get(cat);
       // Mirror parse-excel.js split: AC for Jan–May (≤4), FC for Jun–Dec (>4)
-      const LAST_ACT_MONTH = 4;
+      const LAST_ACT_MONTH = (typeof (window.__lastActMonth) === "number") ? window.__lastActMonth : 4;
       const ac     = (li.monthlyAC||[]).slice(0, LAST_ACT_MONTH + 1).reduce((s,x)=>s+x,0);
       const fcOnly = (li.monthlyFC||[]).slice(LAST_ACT_MONTH + 1).reduce((s,x)=>s+x,0);
       const fc     = ac + fcOnly;
@@ -408,7 +408,7 @@ function VendorDetail({ vendor: v, onClose }) {
                           </thead>
                           <tbody>
                             {cg.items.map((li, idx) => {
-                              const LAST_ACT = 4;
+                              const LAST_ACT = (typeof (window.__lastActMonth) === "number") ? window.__lastActMonth : 4;
                               const acLI   = (li.monthlyAC||[]).slice(0, LAST_ACT+1).reduce((s,x)=>s+x,0);
                               const fcOnly = (li.monthlyFC||[]).slice(LAST_ACT+1).reduce((s,x)=>s+x,0);
                               const fcLI   = acLI + fcOnly; // full year forecast
@@ -508,7 +508,7 @@ function VendorTable({ vendors, onSelect, selected }) {
         const subMap = catMap.get(cat);
         if (!subMap.has(subCat)) subMap.set(subCat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0 });
         const g = subMap.get(subCat);
-        const _LA = 4;
+        const _LA = (typeof (window.__lastActMonth) === "number") ? window.__lastActMonth : 4;
         const _ac = (li.monthlyAC||[]).slice(0,_LA+1).reduce((s,x)=>s+x,0);
         const _fc = _ac + (li.monthlyFC||[]).slice(_LA+1).reduce((s,x)=>s+x,0);
         g.budget   += li.budget || 0;
