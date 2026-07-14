@@ -202,8 +202,8 @@ function OvCatWaterfall({ catBudget, catForecast, wfSteps }) {
   const ceilV   = rawMax + spread * 0.65;
   const vRange  = Math.max(ceilV - floorV, 1);
 
-  const VW = 1060, VH = 360;
-  const CT = 86, CB = 120;
+  const VW = 1060, VH = 390;
+  const CT = 86, CB = 150;
   const CH = VH - CT - CB;
   const AXIS_Y = CT + CH;
   const CL = 16, CR = 1044;

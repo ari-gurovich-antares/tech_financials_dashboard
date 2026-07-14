@@ -23,78 +23,6 @@ function _fmtTs(ts) {
   return i < 0 ? ts : ts.slice(0, i) + ' · ' + ts.slice(i + 2);
 }
 
-// ── YTD Reconciliation Marker ──────────────────────────────────────────
-// Subtle indicator shown in the topbar next to "last updated".
-// Green = Master Data and YTD pivot agree within $1K.
-// Amber = they differ (stale pivot or row scope change).
-// Hover reveals a popover with the diff detail.
-function YtdMarker({ workbookSubtotal, ytdSummary }) {
-  const [open, setOpen] = useStateA(false);
-  if (!ytdSummary || !workbookSubtotal) return null;
-
-  const md  = workbookSubtotal;
-  const ytd = ytdSummary;
-  const diffs = {
-    budget:   Math.round(md.budget   - ytd.budget),
-    forecast: Math.round(md.forecast - ytd.forecast),
-    risk:     Math.round(md.risk     - ytd.risk),
-    net:      Math.round(md.net      - ytd.net),
-  };
-  const reconciled = Object.values(diffs).every(d => Math.abs(d) <= 1000);
-  const fmtK = n => (n >= 0 ? '+' : '') + '$' + (n / 1000).toFixed(1) + 'K';
-  const fmtM = n => '$' + (n / 1e6).toFixed(2) + 'M';
-
-  return (
-    <div style={{ position:'relative' }}>
-      <div
-        onClick={() => setOpen(o => !o)}
-        style={{
-          display:'flex', alignItems:'center', gap:4, cursor:'pointer',
-          padding:'3px 8px', border:'1px solid',
-          borderColor: reconciled ? 'rgba(114,212,160,0.5)' : 'rgba(255,200,80,0.5)',
-          background:  reconciled ? 'rgba(31,122,77,0.18)'  : 'rgba(150,96,10,0.18)',
-          borderRadius:3,
-        }}
-      >
-        <span style={{ width:6, height:6, borderRadius:'50%', background: reconciled ? '#72D4A0' : '#F5B942', flexShrink:0 }} />
-        <span style={{ fontSize:10, fontWeight:600, letterSpacing:'0.06em', color: reconciled ? '#A8E8C8' : '#F5D080', whiteSpace:'nowrap' }}>
-          {reconciled ? 'YTD reconciled' : 'YTD refresh needed'}
-        </span>
-      </div>
-      {open && (
-        <div style={{
-          position:'absolute', right:0, top:'calc(100% + 6px)', zIndex:200,
-          background:'#1A1F3C', border:'1px solid #333C66', borderRadius:6,
-          padding:'12px 14px', minWidth:240, boxShadow:'0 4px 16px rgba(0,0,0,0.4)',
-          fontFamily:'var(--font-sans)', fontSize:11, color:'#D8D6D2',
-        }}>
-          <div style={{ fontWeight:700, color:'#fff', marginBottom:8, fontSize:12 }}>YTD Reconciliation</div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto', gap:'3px 10px', marginBottom:10 }}>
-            {[['Budget', md.budget, ytd.budget], ['Forecast', md.forecast, ytd.forecast], ['Risk', md.risk, ytd.risk], ['Net', md.net, ytd.net]].map(([label, mdV, ytdV]) => {
-              const d = Math.round(mdV - ytdV);
-              return [
-                <span key={label+'-l'} style={{ color:'#9E9B97' }}>{label}</span>,
-                <span key={label+'-m'} style={{ textAlign:'right', color:'#D8D6D2', fontVariantNumeric:'tabular-nums' }}>{fmtM(mdV)}</span>,
-                <span key={label+'-d'} style={{ textAlign:'right', fontVariantNumeric:'tabular-nums', color: Math.abs(d)>1000?'#F5B942':'#72D4A0' }}>{fmtK(d)}</span>,
-              ];
-            })}
-          </div>
-          <div style={{ borderTop:'1px solid #333C66', paddingTop:8, fontSize:10, color:'#807E7A', lineHeight:1.5 }}>
-            {reconciled
-              ? 'Master Data and YTD pivot agree within $1K.'
-              : 'Suggested action: open workbook → Data → Refresh All → save → re-upload.'}
-          </div>
-          <div style={{ marginTop:6, display:'grid', gridTemplateColumns:'auto auto', gap:'2px 10px', fontSize:9.5, color:'#807E7A' }}>
-            <span>MD</span><span>Master Data (cleaned)</span>
-            <span>Diff</span><span>MD minus YTD Financials Run Rate</span>
-          </div>
-          <button onClick={e=>{e.stopPropagation();setOpen(false);}} style={{ position:'absolute', top:8, right:10, background:'none', border:'none', color:'#807E7A', cursor:'pointer', fontSize:14, lineHeight:1 }}>×</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function exportAllTables(data) {
   if (typeof XLSX === 'undefined') { alert('SheetJS not loaded — please refresh.'); return; }
   const wb = XLSX.utils.book_new();
@@ -333,7 +261,6 @@ function App({ data: initialData }) {
           Upload Workbook
         </button>
         <div style={{ display:'flex', gap:12, alignItems:'center' }}>
-          <YtdMarker workbookSubtotal={data.workbookSubtotal} ytdSummary={data.ytdSummary} />
           <div style={{ display:'flex', gap:20, alignItems:'center' }}>
             <div className="timestamp" style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.3 }}>
               <span className="label">As of</span>
@@ -378,7 +305,7 @@ function App({ data: initialData }) {
 
 
       {activeTab === 'vendors' && (
-        <div className="content"><VendorsTab data={ctx} view={filters.view} /></div>
+        <div className="content"><VendorsTab key={uploadKey} data={ctx} view={filters.view} /></div>
       )}
       {activeTab === '57' && (
         <div className="content"><Tab57 key={uploadKey} data={ctx} /></div>
