@@ -1,7 +1,17 @@
 // Vendors tab — lean table + rich drilldown
 const { useState: useStateV, useMemo: useMemoV, useRef: useRefV, useEffect: useEffectV } = React;
 
-const VD_CATS = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'FPC'];
+const VD_CATS = ['Labor/ T&M', 'MS', 'FPC', 'Software', 'Hardware', 'Infrastructure', 'OOE'];
+
+// Category display name mapper (mirrors filter-bar.jsx)
+const _CAT_DISPLAY_V = {
+  'Labor/ T&M': 'Labor/T&M', 'Labor/T&M': 'Labor/T&M',
+  'MS': 'Managed Service (MS)', 'Managed Service': 'Managed Service (MS)', 'Managed Service (MS)': 'Managed Service (MS)',
+  'FPC': 'Fixed Price Contract (FPC)', 'Fixed Price Contract': 'Fixed Price Contract (FPC)', 'Fixed Price Contract (FPC)': 'Fixed Price Contract (FPC)',
+  'OOE': 'Other Operating Expense (OOE)', 'Other Operating Expense': 'Other Operating Expense (OOE)', 'Other Operating Expense (OOE)': 'Other Operating Expense (OOE)',
+};
+function catDisplayV(c) { return _CAT_DISPLAY_V[c] || c; }
+
 function vdCat(li) {
   return li.subCategory || li.category || '(Other)';
 }
@@ -168,7 +178,7 @@ function VendorDetail({ vendor: v, onClose }) {
     // Build rollup per category from lineItems
     const rollup = new Map();
     for (const li of lineItems) {
-      const cat = li.spendCategory || li.subCategory || li.category || '(Uncategorized)';
+      const cat = li.category || li.subCategory || '(Uncategorized)';
       if (!rollup.has(cat)) rollup.set(cat, { budget:0, actual:0, forecast:0, risk:0, opp:0, net:0, items:[] });
       const g = rollup.get(cat);
       // Mirror parse-excel.js split: AC for Jan–May (≤4), FC for Jun–Dec (>4)
@@ -216,14 +226,14 @@ function VendorDetail({ vendor: v, onClose }) {
           </div>
           <div style={{ fontSize:20, fontWeight:800, color:'#1A1F3C', letterSpacing:'-0.01em', marginBottom:6 }}>{v.vendor}</div>
           <div style={{ display:'flex', gap:20, flexWrap:'wrap' }}>
-            {v.domains?.length > 0 && (
+            {v.domains?.filter(d => !/amort/i.test(d)).length > 0 && (
               <span style={{ fontSize:11, color:'#807E7A' }}>
-                <span style={{ color:'#B0ADA9', marginRight:4 }}>Domain:</span>{v.domains.join(' · ')}
+                <span style={{ color:'#B0ADA9', marginRight:4 }}>Domain:</span>{v.domains.filter(d => !/amort/i.test(d)).join(' · ')}
               </span>
             )}
-            {v.domainOwners?.length > 0 && (
+            {v.domainOwners?.filter(o => !/amort/i.test(o)).length > 0 && (
               <span style={{ fontSize:11, color:'#807E7A' }}>
-                <span style={{ color:'#B0ADA9', marginRight:4 }}>Owner:</span>{v.domainOwners.join(' · ')}
+                <span style={{ color:'#B0ADA9', marginRight:4 }}>Owner:</span>{v.domainOwners.filter(o => !/amort/i.test(o)).join(' · ')}
               </span>
             )}
             <span style={{ fontSize:11, color:'#B0ADA9' }}>{lineItems.length} line item{lineItems.length!==1?'s':''}</span>
@@ -274,7 +284,7 @@ function VendorDetail({ vendor: v, onClose }) {
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
                 <thead>
                   <tr style={{ background:'#F5F3F0' }}>
-                    <th style={{ padding:'8px 14px', textAlign:'left', fontWeight:600, color:'#9E9B97', fontSize:11, width:80, borderBottom:'1px solid #EDECEA' }}></th>
+                    <th style={{ padding:'8px 14px', textAlign:'right', fontWeight:600, color:'#9E9B97', fontSize:11, width:80, borderBottom:'1px solid #EDECEA' }}></th>
                     {MONTHS.map((mo, i) => (
                       <th key={mo} style={{ padding:'8px 10px', textAlign:'center', fontWeight:500, color: i < actCnt ? '#807E7A' : '#B0ADA9', fontSize:11, borderBottom:'1px solid #EDECEA', whiteSpace:'nowrap' }}>
                         {mo.toLowerCase()}
@@ -363,7 +373,7 @@ function VendorDetail({ vendor: v, onClose }) {
             <div style={{ border:'1px solid #EDECEA', borderRadius:6, overflow:'hidden' }}>
               {catGroups.map((cg, ci) => {
                 const isOpen = expandedCat === cg.category;
-                const cons   = cg.budget > 0 ? cg.forecast / cg.budget * 100 : null;
+                const cons   = cg.budget > 0 ? cg.actual / cg.budget * 100 : null;
                 return (
                   <div key={cg.category}>
                     {/* Level 1 – category row */}
@@ -381,8 +391,8 @@ function VendorDetail({ vendor: v, onClose }) {
                           <div style={{ fontSize:11, color:'#807E7A', marginTop:5, marginLeft:17, lineHeight:1.45, maxWidth:440 }}>{cg.note}</div>
                         )}
                       </div>
-                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actual Spend', cg.actual>0?fmt.k(cg.actual):'—'], ['Rem. Forecast', fmt.k(cg.forecast)], ['Act+FC', fmt.k(cg.actual+cg.forecast)], ['Budget Consumption', cons!==null?`${cons.toFixed(0)}%`:'—'], ['Risk', cg.risk>100?fmt.k(cg.risk):'—'], ['Opp', cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'], ['Net R/(O)', Math.abs(cg.net)>100?fmt.signed(cg.net):'—']].map(([lbl,val],vi) => (
-                        <div key={lbl} style={{ textAlign:'right', minWidth:52, flexShrink:0 }}>
+                      {[['Budget', cg.budget>0?fmt.k(cg.budget):'—'], ['Actual Spend', cg.actual>0?fmt.k(cg.actual):'—'], ['Remaining Forecast', fmt.k(cg.forecast - cg.actual)], ['Actual Spend + Remaining Forecast', fmt.k(cg.forecast)], ['Budget Consumption', cons!==null?`${cons.toFixed(0)}%`:'—'], ['Risk', cg.risk>100?fmt.k(cg.risk):'—'], ['Opp', cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'], ['Net R/(O)', Math.abs(cg.net)>100?fmt.signed(cg.net):'—']].map(([lbl,val],vi) => (
+                        <div key={lbl} style={{ textAlign:'right', minWidth:70, flexShrink:0 }}>
                           <div style={{ fontSize:8, color:'#B0ADA9', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3, whiteSpace:'nowrap' }}>{lbl}</div>
                           <div style={{ fontSize:12, fontWeight:700, color: lbl==='Budget Consumption'&&cons!==null ? (cons>100?'#C03A3A':cons>85?'#96600A':'#333C66') : lbl==='Risk'&&cg.risk>100 ? '#C03A3A' : lbl==='Opp'&&cg.opp<-100 ? '#1F7A4D' : lbl==='Net R/(O)' ? (cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2') : '#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{val}</div>
                         </div>
@@ -395,15 +405,16 @@ function VendorDetail({ vendor: v, onClose }) {
                         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                           <thead>
                             <tr style={{ background:'#EAECF6' }}>
-                              <th style={{ padding:'7px 16px 7px 32px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Project / Application</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Project / Application</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Budget</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Actual Spend</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Remaining Forecast</th>
-                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Act+FC</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Actual Spend + Remaining Forecast</th>
+                              <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Budget Consumption</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Risk</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Opp</th>
                               <th style={{ padding:'7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Net R/(O)</th>
-                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'left', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes</th>
+                              <th style={{ padding:'7px 16px 7px 12px', textAlign:'right', fontWeight:600, color:'#6699FF', fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' }}>Notes</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -414,7 +425,7 @@ function VendorDetail({ vendor: v, onClose }) {
                               const fcLI   = acLI + fcOnly; // full year forecast
                               return (
                                 <tr key={idx} style={{ borderTop:'1px solid #E4E6F2', background: idx%2===0?'#F6F7FB':'#F0F1F8' }}>
-                                  <td style={{ padding:'8px 12px 8px 32px', color:'#1A1F3C' }}>
+                                  <td style={{ padding:'8px 12px', color:'#1A1F3C', textAlign:'right' }}>
                                     <div style={{ fontWeight:500 }}>{li.application || li.project || '—'}</div>
                                     {li.project && li.application && <div style={{ fontSize:10, color:'#B0ADA9', marginTop:1 }}>{li.project}</div>}
                                   </td>
@@ -422,12 +433,13 @@ function VendorDetail({ vendor: v, onClose }) {
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', color:acLI>0?'#1A1F3C':'#D8D6D2', whiteSpace:'nowrap' }}>{acLI>0?fmt.k(acLI):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(fcOnly)}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:600, color:'#333C66', whiteSpace:'nowrap' }}>{fmt.k(fcLI)}</td>
+                                  <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color: li.budget>0?(acLI/li.budget>1?'#C03A3A':acLI/li.budget>0.85?'#96600A':'#333C66'):'#D8D6D2' }}>{li.budget>0?Math.round(acLI/li.budget*100)+'%':'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:(li.risk||0)>100?'#C03A3A':'#D8D6D2' }}>{(li.risk||0)>100?fmt.k(li.risk):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:(li.opp||0)<-100?'#1F7A4D':'#D8D6D2' }}>{(li.opp||0)<-100?fmt.k(Math.abs(li.opp)):'—'}</td>
                                   <td style={{ padding:'8px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', fontWeight:Math.abs(li.net||0)>100?600:400, color:(li.net||0)>100?'#C03A3A':(li.net||0)<-100?'#1F7A4D':'#D8D6D2' }}>
                                     {Math.abs(li.net||0)>100?fmt.signed(li.net):'—'}
                                   </td>
-                                  <td style={{ padding:'8px 16px 8px 12px', color:'#807E7A', fontSize:10, lineHeight:1.4, wordBreak:'break-word', maxWidth:200 }}>
+                                  <td style={{ padding:'8px 12px', color:'#807E7A', textAlign:'right', fontSize:10, lineHeight:1.4, wordBreak:'break-word', maxWidth:200 }}>
                                     {li.notes || <span style={{ color:'#D8D6D2' }}>—</span>}
                                   </td>
                                 </tr>
@@ -441,6 +453,7 @@ function VendorDetail({ vendor: v, onClose }) {
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{cg.actual>0?fmt.k(cg.actual):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast - cg.actual)}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.k(cg.forecast)}</td>
+                              <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color: cg.budget>0?(cg.actual/cg.budget>1?'#C03A3A':cg.actual/cg.budget>0.85?'#96600A':'#333C66'):'#9E9B97' }}>{cg.budget>0?Math.round(cg.actual/cg.budget*100)+'%':'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.risk>100?'#C03A3A':'#D8D6D2' }}>{cg.risk>100?fmt.k(cg.risk):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.opp<-100?'#1F7A4D':'#D8D6D2' }}>{cg.opp<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
                               <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:700, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', color:cg.net>100?'#C03A3A':cg.net<-100?'#1F7A4D':'#D8D6D2' }}>{Math.abs(cg.net)>100?fmt.signed(cg.net):'—'}</td>
@@ -547,7 +560,7 @@ function VendorTable({ vendors, onSelect, selected }) {
     <th onClick={col?()=>toggleSort(col):undefined}
       style={{ padding:'8px 10px', fontSize:10, fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase',
         color:'#6699FF', background:'#F4F5FA', whiteSpace:'nowrap', cursor:col?'pointer':'default',
-        textAlign:'left', userSelect:'none', borderBottom:'2px solid #EDECEA' }}>
+        textAlign:'right', userSelect:'none', borderBottom:'2px solid #EDECEA' }}>
       {children}{col&&<SI col={col}/>}
     </th>
   );
@@ -566,16 +579,30 @@ function VendorTable({ vendors, onSelect, selected }) {
             <span style={{ fontSize:11, color:'#9E9B97', fontVariantNumeric:'tabular-nums' }}>
               {sortedVendors.length}{sortedVendors.length !== vendors.length ? ` of ${vendors.length}` : ''} vendors
             </span>
-            <ExportBtn onClick={() => xlsxExport(sortedVendors.map(v => ({
-              'Vendor': v.vendor,
-              'Budget': v.budget,
-              'Actual Spend': v.actual,
-              'Remaining Forecast': v.forecast - v.actual,
-              'Actual Spend + Remaining Forecast': v.forecast,
-              'Risk': v.risk,
-              'Opportunity': v.opp,
-              'Net Risk/(Opp)': v.net,
-            })), 'Vendors')} />
+            <ExportBtn onClick={() => {
+              const rows = [];
+              sortedVendors.forEach(v => {
+                (v.lineItems || []).forEach(li => {
+                  rows.push({
+                    'Vendor': v.vendor,
+                    'Category': li.category || '',
+                    'Sub-Category': li.subCategory || '',
+                    'Project / Application': li.project || '',
+                    'Domain': li.domain || '',
+                    'Owner': li.owner || '',
+                    'Budget': li.budget || 0,
+                    'Actual Spend': li.actual || 0,
+                    'Remaining Forecast': (li.forecast || 0) - (li.actual || 0),
+                    'Actual Spend + Remaining Forecast': li.forecast || 0,
+                    'Risk': li.risk || 0,
+                    'Opportunity': li.opp || 0,
+                    'Net Risk/(Opp)': li.net || 0,
+                    'Notes': li.notes || '',
+                  });
+                });
+              });
+              xlsxExport(rows, 'Vendors');
+            }} />
           </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
@@ -598,7 +625,8 @@ function VendorTable({ vendors, onSelect, selected }) {
               <TH col="budget" right>Budget</TH>
               <TH col="actual" right>Actual Spend</TH>
               <TH right>Remaining Forecast</TH>
-              <TH col="actfc" right>Act. Spend + Rem. FC</TH>
+              <TH col="actfc" right>Actual Spend + Remaining Forecast</TH>
+              <TH right>Budget Consumption</TH>
               <TH col="risk" right>Risk</TH>
               <TH col="opp" right>Opportunity</TH>
               <TH col="net" right>Net Risk/Opp</TH>
@@ -627,6 +655,7 @@ function VendorTable({ vendors, onSelect, selected }) {
                     {numKB(v.actual)}
                     {numKB(v.forecast - v.actual)}
                     {numKB(v.forecast)}
+                    <td className="num" style={{ fontWeight:700, color:'#9E9B97' }}>{v.budget>0?Math.round(v.actual/v.budget*100)+'%':'—'}</td>
                     <td className="num" style={{ fontWeight:700, color:riskColor(v.risk||0) }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
                     <td className="num" style={{ fontWeight:700, color:oppColor(v.opp||0) }}>{(v.opp||0)<-100?fmt.k(Math.abs(v.opp)):'—'}</td>
                     <td className="num" style={{ fontWeight:700, color:netColor(v.net||0) }}>{Math.abs(v.net||0)>100?fmt.signed(v.net):'—'}</td>
@@ -662,11 +691,12 @@ function VendorTable({ vendors, onSelect, selected }) {
                           {cg.cat}
                         </td>
                       )}
-                      <td style={{ padding:'7px 10px', color:'#1A1F3C' }}>{sc.subCat}</td>
+                      <td style={{ padding:'7px 10px', color:'#1A1F3C', textAlign:'right' }}>{sc.subCat}</td>
                       {numK(sc.budget)}
                       {numK(sc.actual)}
                       {numK(sc.forecast - sc.actual)}
                       {numK(sc.forecast)}
+                      <td className="num" style={{ color: sc.budget>0 ? (sc.actual/sc.budget>1?'#C03A3A':sc.actual/sc.budget>0.85?'#96600A':'#333C66') : '#9E9B97' }}>{sc.budget>0?Math.round(sc.actual/sc.budget*100)+'%':'—'}</td>
                       <td className="num" style={{ color:riskColor(sc.risk||0) }}>{(sc.risk||0)>100?fmt.k(sc.risk):'—'}</td>
                       <td className="num" style={{ color:oppColor(sc.opp||0) }}>{(sc.opp||0)<-100?fmt.k(Math.abs(sc.opp)):'—'}</td>
                       <td className="num" style={{ color:netColor(sc.net||0) }}>{Math.abs(sc.net||0)>100?fmt.signed(sc.net):'—'}</td>
@@ -680,11 +710,12 @@ function VendorTable({ vendors, onSelect, selected }) {
                   <tr key={`${v.vendor}||${cg.cat}||subtotal`} style={{ background: isSel ? '#E4E8FF' : ci%2===0 ? '#EDEFF8' : '#E8EAF4', cursor:'pointer' }}
                     onClick={() => onSelect && onSelect(isSel ? null : v)}>
                     {/* vendor + category cells are rowspanned */}
-                    <td style={{ padding:'7px 10px', fontWeight:700, color:'#333C66', fontSize:10, fontStyle:'italic', letterSpacing:'0.04em' }}>Subtotal</td>
+                    <td style={{ padding:'7px 10px', fontWeight:700, color:'#333C66', textAlign:'right', fontSize:10, fontStyle:'italic', letterSpacing:'0.04em' }}>Subtotal</td>
                     {numKB(cg.budget)}
                     {numKB(cg.actual)}
                     {numKB(cg.forecast - cg.actual)}
                     {numKB(cg.forecast)}
+                    <td className="num" style={{ fontWeight:700, color: cg.budget>0 ? (cg.actual/cg.budget>1?'#C03A3A':cg.actual/cg.budget>0.85?'#96600A':'#333C66') : '#9E9B97' }}>{cg.budget>0?Math.round(cg.actual/cg.budget*100)+'%':'—'}</td>
                     <td className="num" style={{ fontWeight:700, color:riskColor(cg.risk||0) }}>{(cg.risk||0)>100?fmt.k(cg.risk):'—'}</td>
                     <td className="num" style={{ fontWeight:700, color:oppColor(cg.opp||0) }}>{(cg.opp||0)<-100?fmt.k(Math.abs(cg.opp)):'—'}</td>
                     <td className="num" style={{ fontWeight:700, color:netColor(cg.net||0) }}>{Math.abs(cg.net||0)>100?fmt.signed(cg.net):'—'}</td>
@@ -702,6 +733,7 @@ function VendorTable({ vendors, onSelect, selected }) {
                   <td className="num" style={{ fontWeight:800, color:'#1A1F3C' }}>{v.actual>0?fmt.k(v.actual):'—'}</td>
                   <td className="num" style={{ fontWeight:800, color:'#1A1F3C' }}>{fmt.k(v.forecast - v.actual)}</td>
                   <td className="num" style={{ fontWeight:800, color:'#1A1F3C' }}>{fmt.k(v.forecast)}</td>
+                  <td className="num" style={{ fontWeight:800, color: v.budget>0?(v.actual/v.budget>1?'#C03A3A':v.actual/v.budget>0.85?'#96600A':'#333C66'):'#9E9B97' }}>{v.budget>0?Math.round(v.actual/v.budget*100)+'%':'—'}</td>
                   <td className="num" style={{ fontWeight:800, color:riskColor(v.risk||0) }}>{(v.risk||0)>100?fmt.k(v.risk):'—'}</td>
                   <td className="num" style={{ fontWeight:800, color:oppColor(v.opp||0) }}>{(v.opp||0)<-100?fmt.k(Math.abs(v.opp)):'—'}</td>
                   <td className="num" style={{ fontWeight:800, color:netColor(v.net||0) }}>{Math.abs(v.net||0)>100?fmt.signed(v.net):'—'}</td>
@@ -742,13 +774,13 @@ function VendorsTab({ data }) {
   const lookups  = data.lookups   || {};
 
   const domainOpts = useMemoV(() => {
-    if (lookups.domains?.length) return lookups.domains.filter(Boolean).sort();
-    return [...new Set(allItems.map(li => li.domain).filter(Boolean))].sort();
+    if (lookups.domains?.length) return lookups.domains.filter(d => d && !/amort/i.test(d)).sort();
+    return [...new Set(allItems.map(li => li.domain).filter(d => d && !/amort/i.test(d)))].sort();
   }, [allItems, lookups]);
 
   const ownerOpts = useMemoV(() => {
-    if (lookups.owners?.length) return lookups.owners.filter(x => x && x !== 'N/A').sort();
-    return [...new Set(allItems.map(li => li.owner).filter(x => x && x !== 'N/A'))].sort();
+    if (lookups.owners?.length) return lookups.owners.filter(x => x && x !== 'N/A' && !/amort/i.test(x)).sort();
+    return [...new Set(allItems.map(li => li.owner).filter(x => x && x !== 'N/A' && !/amort/i.test(x)))].sort();
   }, [allItems, lookups]);
 
   const filterActive = flt.domains.length + flt.owners.length + flt.cats.length + flt.vendors.length > 0;
@@ -779,7 +811,7 @@ function VendorsTab({ data }) {
         risk:      fi.reduce((s,li) => s + (li.risk || 0), 0),
         opp:       fi.reduce((s,li) => s + (li.opp  || 0), 0),
         net:       fi.reduce((s,li) => s + (li.net  || 0), 0),
-        domains:   [...new Set(fi.map(li => li.domain).filter(Boolean))],
+        domains:   [...new Set(fi.map(li => li.domain).filter(d => d && !/amort/i.test(d)))],
         monthlyAC: ac12, monthlyFC: fc12, lineItems: fi,
       };
     }).filter(Boolean);
@@ -841,7 +873,7 @@ function VendorsTab({ data }) {
         <OvFD label="Vendor"       options={vendorOpts} value={flt.vendors} onChange={v => setFlt({...flt, vendors:v})} />
         <OvFD label="Domain"       options={domainOpts} value={flt.domains} onChange={v => setFlt({...flt, domains:v})} />
         <OvFD label="Domain Owner" options={ownerOpts}  value={flt.owners}  onChange={v => setFlt({...flt, owners:v})} />
-        <OvFD label="Category"     options={VD_CATS}    value={flt.cats}    onChange={v => setFlt({...flt, cats:v})} />
+        <OvFD label="Category"     options={VD_CATS}    value={flt.cats}    onChange={v => setFlt({...flt, cats:v})} displayFn={catDisplayV} />
         {filterActive && (
           <>
             <button onClick={clearFilters} style={{ padding:'6px 12px', background:'none', border:'1px solid #ECEAE7', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:12, color:'#807E7A' }}>
@@ -1036,7 +1068,7 @@ function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
       </div>
 
       {/* Chart */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, overflowX: 'auto', paddingBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 0, overflowX: 'auto', paddingBottom: 8, paddingTop: 20 }}>
         {top.map((v, i) => {
           const budget    = v.budget || 0;
           const actuals   = v.actual || 0;
@@ -1062,29 +1094,25 @@ function VendorBudgetActualsChart({ vendors, n = 10, onSelect }) {
                 transition: 'background 0.12s',
               }}
             >
-              {/* Bars */}
+              {/* Bars — labels pinned just above each bar */}
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: BAR_H, width: '100%', justifyContent: 'center' }}>
                 {/* Bar 1: Budget */}
-                <div style={{ width: '38%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', height: BAR_H }}>
-                  <span style={{ fontSize:8, fontWeight:700, color:'#333C66', marginBottom:3, fontVariantNumeric:'tabular-nums', letterSpacing:'0.02em' }}>{fmt.m2(budget)}</span>
-                  <div style={{ width:'100%', height: budgetH, background: '#333C66', borderRadius: '3px 3px 0 0', minHeight: budget > 0 ? 2 : 0, transition: 'height 0.3s', display:'flex', alignItems:'flex-start', justifyContent:'center', paddingTop:4, overflow:'hidden' }} title={`Budget: ${fmt.k(budget)}`}>
-                    {budgetH > 18 && <span style={{ fontSize:8, fontWeight:700, color:'rgba(255,255,255,0.7)', fontVariantNumeric:'tabular-nums', letterSpacing:'0.02em' }}>{fmt.m2(budget)}</span>}
-                  </div>
+                <div style={{ width: '38%', position:'relative', height: BAR_H, display:'flex', alignItems:'flex-end' }}>
+                  <div style={{ position:'absolute', bottom: budgetH + 2, left:0, right:0, textAlign:'center', fontSize:8, fontWeight:700, color:'#333C66', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.m2(budget)}</div>
+                  <div style={{ width:'100%', height: budgetH, background: '#333C66', borderRadius: '3px 3px 0 0', minHeight: budget > 0 ? 2 : 0 }} title={`Budget: ${fmt.k(budget)}`} />
                 </div>
                 {/* Bar 2: Stacked Actual + Remaining */}
-                <div style={{ width: '38%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'flex-end', height: BAR_H }}>
-                  <span style={{ fontSize:8, fontWeight:700, color:'#1A1F3C', marginBottom:3, fontVariantNumeric:'tabular-nums', letterSpacing:'0.02em' }}>{fmt.m2(actuals + remaining)}</span>
-                  <div style={{ width:'100%', display:'flex', flexDirection:'column', justifyContent:'flex-end', borderRadius:'3px 3px 0 0', overflow:'hidden', minHeight:(actuals+remaining)>0?2:0 }}>
+                <div style={{ width: '38%', position:'relative', height: BAR_H, display:'flex', alignItems:'flex-end' }}>
+                  <div style={{ position:'absolute', bottom: (actualsH + remainH) + 2, left:0, right:0, textAlign:'center', fontSize:8, fontWeight:700, color:'#1A1F3C', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.m2(actuals + remaining)}</div>
+                  <div style={{ width:'100%', display:'flex', flexDirection:'column', borderRadius:'3px 3px 0 0', overflow:'hidden', height: actualsH + remainH, minHeight:(actuals+remaining)>0?2:0 }}>
                     {remaining > 0 && (
-                      <div style={{ background:'#E8873A', display:'flex', flexDirection:'column', alignItems:'center' }} title={`Remaining Forecast: ${fmt.k(remaining)}`}>
-                        <span style={{ fontSize:8, fontWeight:700, color:'#E8873A', fontVariantNumeric:'tabular-nums', padding:'2px 0', whiteSpace:'nowrap' }}>{fmt.m2(remaining)}</span>
-                        <div style={{ width:'100%', height: remainH, background:'#E8873A', flexShrink:0 }} />
+                      <div style={{ background:'#E8873A', height: remainH, width:'100%', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', flexShrink:0 }} title={`Remaining Forecast: ${fmt.k(remaining)}`}>
+                        {remainH > 8 && <span style={{ fontSize:7, fontWeight:700, color:'#fff', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.m2(remaining)}</span>}
                       </div>
                     )}
                     {actuals > 0 && (
-                      <div style={{ background:'#6699FF', display:'flex', flexDirection:'column', alignItems:'center' }} title={`Actual Spend: ${fmt.k(actuals)}`}>
-                        <span style={{ fontSize:8, fontWeight:700, color:'#fff', fontVariantNumeric:'tabular-nums', padding:'2px 0', whiteSpace:'nowrap' }}>{fmt.m2(actuals)}</span>
-                        <div style={{ width:'100%', height: actualsH, background:'#6699FF', flexShrink:0 }} />
+                      <div style={{ background:'#6699FF', height: actualsH, width:'100%', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', flexShrink:0 }} title={`Actual Spend: ${fmt.k(actuals)}`}>
+                        {actualsH > 8 && <span style={{ fontSize:7, fontWeight:700, color:'#fff', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{fmt.m2(actuals)}</span>}
                       </div>
                     )}
                   </div>
@@ -1138,7 +1166,7 @@ function VendorRankChart({ vendors, sortKey, title, subtitle, n = 10 }) {
                   <div style={{ height:'100%', width:`${pct}%`, background:'#333C66', borderRadius:2, transition:'width 0.3s ease' }} />
                 </div>
               </div>
-              <span style={{ fontSize:12, fontWeight:700, color:'#1A1F3C', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', minWidth:52, textAlign:'right' }}>
+              <span style={{ fontSize:12, fontWeight:700, color:'#1A1F3C', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', minWidth:70, textAlign:'right' }}>
                 {fmt.m2(val)}
               </span>
             </div>

@@ -16,7 +16,7 @@ const OV = {
   sans:   "'Inter', Arial, sans-serif",
 };
 
-const OV_CATS = ['Labor/ T&M', 'Software', 'MS', 'Infrastructure', 'Hardware', 'OOE', 'FPC'];
+const OV_CATS = ['Labor/ T&M', 'MS', 'FPC', 'Software', 'Hardware', 'Infrastructure', 'OOE'];
 
 // Group by Sub-Category1 — this matches the YTD Financials Run Rate pivot grouping.
 // All rows (including Amortization TX type) are grouped by their Sub-Category1 value.
@@ -37,7 +37,8 @@ function OvEyebrow({ text, light }) {
 }
 
 // ── OvFilterDrop — compact multi-select dropdown ──────────────────────────
-function OvFilterDrop({ label, options, value, onChange }) {
+function OvFilterDrop({ label, options, value, onChange, displayFn }) {
+  const _disp = displayFn || (o => o);
   const [open, setOpen] = useStateOV(false);
   const [noneMode, setNoneMode] = useStateOV(false);
   const ref = useRefOV(null);
@@ -89,7 +90,7 @@ function OvFilterDrop({ label, options, value, onChange }) {
           transition: 'all 0.12s',
         }}
       >
-        {noneMode ? `${label} · 0` : value.length > 0 ? `${label} · ${value.length}` : label}
+        {noneMode ? `${label} · 0` : value.length > 0 ? (value.length === 1 ? `${label} · ${_disp(value[0])}` : `${label} · ${value.length}`) : label}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d={open ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'} />
@@ -132,7 +133,7 @@ function OvFilterDrop({ label, options, value, onChange }) {
                 fontSize: 12, fontFamily: OV.sans,
                 color: isChecked(opt) ? OV.navy : '#3C3A36',
                 fontWeight: isChecked(opt) ? 600 : 400,
-              }}>{opt}</span>
+              }}>{_disp(opt)}</span>
             </label>
           ))}
         </div>
@@ -336,6 +337,7 @@ function OverviewTab({ data }) {
   const [sel, setSel]             = useStateOV(null);
   const [openPanel, setOpenPanel] = useStateOV(null);
   const [selVendorDrill, setSelVendorDrill]     = useStateOV(null);
+  const [vendorSort, setVendorSort] = useStateOV({ col: 'budget', dir: -1 });
   const [flt, setFlt]             = useStateOV({ domains: [], owners: [], cats: [] });
 
   const allItems = data.lineItems || [];
@@ -582,6 +584,7 @@ function OverviewTab({ data }) {
         <OvFilterDrop
           label="Category" options={OV_CATS}
           value={flt.cats} onChange={v => setFlt({ ...flt, cats: v })}
+          displayFn={o => (window._catDisplay && window._catDisplay[o]) || o}
         />
         {filterActive && (
           <>
@@ -801,6 +804,10 @@ function OverviewTab({ data }) {
             const drillable = hasRisk || hasOpp;
             const riskPct   = hasRisk ? (risk / ovMaxBar) * 80 : 0;
             const oppPct    = hasOpp  ? (opp  / ovMaxBar) * 80 : 0;
+            // Netted-out (cancelled) portion
+            const cancelledAmt = Math.min(risk, opp);
+            const cancelledRiskPct = cancelledAmt > 500 ? (cancelledAmt / ovMaxBar) * 80 : 0;
+            const cancelledOppPct  = cancelledRiskPct;
 
             return (
               <div key={cat}
@@ -820,19 +827,28 @@ function OverviewTab({ data }) {
                 <div style={{ width: 160, flexShrink: 0, fontSize: 14, fontWeight: isSel ? 600 : 400,
                   color: isSel ? OV.navy : '#3C3A36',
                   display: 'flex', alignItems: 'center', gap: 5 }}>
-                  {cat}
+                  {(window._catDisplay && window._catDisplay[cat]) || cat}
                   {drillable && !isSel && <span style={{ fontSize: 9, color: OV.stone, opacity: 0.4 }}>›</span>}
                   {isSel && <span style={{ fontSize: 9, color: OV.navy, opacity: 0.5 }}>▾</span>}
                 </div>
 
                 {/* Opportunity — green, extends left */}
-                <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingRight: 3 }}>
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingRight: 3, position: 'relative' }}>
                   {hasOpp && (<>
                     <div style={{ fontSize: 12, color: OV.green, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
                       {fmt.k(opp)}
                     </div>
-                    <div style={{ height: 22, width: `${oppPct}%`, background: OV.green,
-                      borderRadius: '3px 0 0 3px', transition: 'width 0.3s ease' }} />
+                    <div style={{ position: 'relative', height: 22, width: `${oppPct}%`, flexShrink: 0 }}>
+                      <div style={{ position: 'absolute', inset: 0, background: OV.green, borderRadius: '3px 0 0 3px' }} />
+                      {cancelledOppPct > 0 && (
+                        <div style={{
+                          position: 'absolute', top: 0, right: 0, bottom: 0,
+                          width: `${(cancelledOppPct / oppPct) * 100}%`,
+                          backgroundImage: 'repeating-linear-gradient(135deg, rgba(180,180,180,0.7) 0px, rgba(180,180,180,0.7) 2px, transparent 2px, transparent 8px)',
+                          borderRadius: '3px 0 0 3px',
+                        }} />
+                      )}
+                    </div>
                   </>)}
                 </div>
 
@@ -841,37 +857,35 @@ function OverviewTab({ data }) {
                 {/* Risk — red, extends right */}
                 <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 6, paddingLeft: 3 }}>
                   {hasRisk && (<>
-                    <div style={{ height: 22, width: `${riskPct}%`, background: OV.red,
-                      borderRadius: '0 3px 3px 0', transition: 'width 0.3s ease' }} />
+                    <div style={{ position: 'relative', height: 22, width: `${riskPct}%`, flexShrink: 0 }}>
+                      <div style={{ position: 'absolute', inset: 0, background: OV.red, borderRadius: '0 3px 3px 0' }} />
+                      {cancelledRiskPct > 0 && (
+                        <div style={{
+                          position: 'absolute', top: 0, left: 0, bottom: 0,
+                          width: `${(cancelledRiskPct / riskPct) * 100}%`,
+                          backgroundImage: 'repeating-linear-gradient(135deg, rgba(180,180,180,0.7) 0px, rgba(180,180,180,0.7) 2px, transparent 2px, transparent 8px)',
+                        }} />
+                      )}
+                    </div>
                     <div style={{ fontSize: 12, color: OV.red, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans }}>
                       {fmt.k(risk)}
                     </div>
                   </>)}
                   {!hasRisk && !hasOpp && <span style={{ fontSize: 12, color: '#C8C6C2', paddingLeft: 4 }}>—</span>}
                 </div>
+                {/* Net R/(O) */}
+                {(hasRisk || hasOpp) && (() => {
+                  const net = risk - opp;
+                  const netColor = net > 0 ? OV.red : OV.green;
+                  return (
+                    <div style={{ width: 90, flexShrink: 0, textAlign: 'right', fontSize: 11, fontWeight: 700, color: netColor, fontVariantNumeric: 'tabular-nums', fontFamily: OV.sans, paddingLeft: 8 }}>
+                      {net > 0 ? fmt.k(net) : `(${fmt.k(Math.abs(net))})`}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
-
-          {/* Footer totals */}
-          <div style={{
-            display: 'flex', justifyContent: 'flex-end', gap: 32, alignItems: 'center',
-            paddingTop: 14, paddingBottom: 2, marginTop: 6,
-            borderTop: '1px solid #EDECEA',
-          }}>
-            <div style={{ fontSize: 11, color: OV.stone, fontFamily: OV.sans }}>
-              {'Total Opportunity: '}
-              <span style={{ color: OV.green, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                {fmt.m(cats.reduce((s, c) => s + c.opp, 0))}
-              </span>
-            </div>
-            <div style={{ fontSize: 11, color: OV.stone, fontFamily: OV.sans }}>
-              {'Total Risk: '}
-              <span style={{ color: OV.red, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                {fmt.m(cats.reduce((s, c) => s + c.risk, 0))}
-              </span>
-            </div>
-          </div>
         </div>
 
         {/* Drill-down panel */}
@@ -942,16 +956,22 @@ function OverviewTab({ data }) {
                   color: OV.stone, marginBottom: 10 }}>
                   {sel === 'FPC' ? 'contract detail' : 'vendor detail'}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px 96px 96px',
-                  padding: '0 0 7px', borderBottom: `1px solid ${OV.border}`,
-                  fontSize: 9, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-                  color: OV.stone, fontFamily: OV.sans, marginBottom: 2 }}>
-                  <span>{sel === 'FPC' ? 'Project' : 'Vendor'}</span>
-                  <span style={{ textAlign: 'right' }}>Budget</span>
-                  <span style={{ textAlign: 'right' }}>Forecast</span>
-                  <span style={{ textAlign: 'right' }}>Variance</span>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 120px 130px 100px', borderBottom:`1px solid ${OV.border}`, marginBottom:2 }}>
+                  {[['vendor','Vendor'],['budget','Budget'],['forecast','Year-End Forecast'],['variance','Variance']].map(([col,label]) => (
+                    <div key={col} onClick={() => setVendorSort(s => ({ col, dir: s.col===col ? -s.dir : -1 }))}
+                      style={{ textAlign: col==='vendor'?'left':'right', fontSize:10, fontWeight:600, color:'#6699FF',
+                        cursor:'pointer', userSelect:'none', fontFamily:OV.sans, padding:'7px 12px',
+                        letterSpacing:'0.05em', textTransform:'uppercase', whiteSpace:'nowrap' }}>
+                      {label}{vendorSort.col===col ? (vendorSort.dir===-1?' ↓':' ↑') : ''}
+                    </div>
+                  ))}
                 </div>
-                {drillVendorsData.vendors.map((v, vi) => {
+                {[...drillVendorsData.vendors].sort((a,b) => {
+                  const col = vendorSort.col;
+                  const va = col==='vendor' ? a.name : col==='variance' ? a.forecast-a.budget : a[col];
+                  const vb = col==='vendor' ? b.name : col==='variance' ? b.forecast-b.budget : b[col];
+                  return vendorSort.col==='vendor' ? va.localeCompare(vb)*vendorSort.dir : (va-vb)*vendorSort.dir;
+                }).map((v, vi) => {
                   const vFav     = v.variance < 0;
                   const vCol     = vFav ? OV.green : OV.red;
                   const isExpand = selVendorDrill === v.name;
@@ -962,7 +982,7 @@ function OverviewTab({ data }) {
                     <div key={v.name}>
                       <div
                         onClick={() => setSelVendorDrill(isExpand ? null : v.name)}
-                        style={{ display: 'grid', gridTemplateColumns: '1fr 96px 96px 96px',
+                        style={{ display: 'grid', gridTemplateColumns: '1fr 120px 130px 100px',
                           padding: '9px 0', borderBottom: '1px solid #F0EEEB',
                           cursor: 'pointer', transition: 'background 0.1s',
                           background: isExpand ? '#F5F4F1' : 'transparent',
@@ -996,7 +1016,7 @@ function OverviewTab({ data }) {
                             return (
                               <div key={ci} style={{ marginBottom: 8, paddingBottom: 8,
                                 borderBottom: ci < ctracts.length - 1 ? '1px solid #ECEAE7' : 'none' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px 96px 96px' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 130px 100px' }}>
                                   <span style={{ fontSize: 12, color: '#3C3A36', paddingRight: 10,
                                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {c.name}

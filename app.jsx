@@ -240,7 +240,7 @@ function App({ data: initialData }) {
         </div>
         <div className="title-block">
           <div className="eyebrow">a n t a r e s &nbsp; c a p i t a l</div>
-          <div className="h-title" style={{ fontWeight: 700 }}>2026 Technology Financials</div>
+          <div className="h-title" style={{ fontWeight: 700 }}>2026 Tech Financials</div>
         </div>
         <div className="spacer" />
         <button

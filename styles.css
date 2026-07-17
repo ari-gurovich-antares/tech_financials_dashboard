@@ -327,6 +327,7 @@ html, body {
   vertical-align: middle;
 }
 .tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tbl tr.clickable { cursor: pointer; transition: background 0.1s; }
 .tbl tr.clickable:hover td { background: #F8FAFE; }
 .tbl tr.selected td { background: var(--antares-bright-blue-100); }

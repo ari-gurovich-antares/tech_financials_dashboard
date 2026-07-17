@@ -400,7 +400,7 @@ return (
       </div>
 
       {/* Row 2: 3 vendor tables | RTB/CTB */}
-      <div style={{ display: 'grid', gridTemplateColumns: '55fr 45fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
         {/* Vendor tables — 3 side by side */}
         <div className="card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>

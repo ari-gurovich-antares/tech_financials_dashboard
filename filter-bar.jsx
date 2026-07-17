@@ -24,7 +24,8 @@ function Segmented({ options, value, onChange }) {
   );
 }
 
-function MultiSelect({ label, options, selected, onChange, allLabel }) {
+function MultiSelect({ label, options, selected, onChange, allLabel, displayFn }) {
+  const _display = displayFn || (o => o);
   const [open, setOpen] = useStateF(false);
   const ref = useRefF();
   useEffectF(() => {
@@ -33,7 +34,7 @@ function MultiSelect({ label, options, selected, onChange, allLabel }) {
     return () => document.removeEventListener('mousedown', close);
   }, []);
   const isAll = selected.length === 0;
-  const display = isAll ? `${allLabel} ${options.length}` : selected.length === 1 ? selected[0] : `${selected.length} selected`;
+  const display = isAll ? `${allLabel} ${options.length}` : selected.length === 1 ? _display(selected[0]) : `${selected.length} selected`;
 
   function handleAll() {
     // If in no-filter mode, expand to explicit-all so user can uncheck individual items
@@ -68,7 +69,7 @@ function MultiSelect({ label, options, selected, onChange, allLabel }) {
           {options.map(o => (
             <button key={o} className="ms-opt" onClick={() => toggle(o)}>
               <span className="ms-check">{isChecked(o) ? '●' : '○'}</span>
-              <span style={{flex:1, overflow:'hidden', textOverflow:'ellipsis'}}>{o}</span>
+              <span style={{flex:1, overflow:'hidden', textOverflow:'ellipsis'}}>{_display(o)}</span>
             </button>
           ))}
         </div>
@@ -78,27 +79,37 @@ function MultiSelect({ label, options, selected, onChange, allLabel }) {
 }
 
 const CATEGORY_ORDER = [
-  'Labor/T&M',
-  'Managed Service',
-  'Managed Service(MS)',
-  'Fixed Price Contract',
-  'Fixed Price Contract(FPC)',
+  'Labor/ T&M', 'Labor/T&M',
+  'Managed Service (MS)', 'Managed Service', 'MS',
+  'Fixed Price Contract (FPC)', 'Fixed Price Contract', 'FPC',
   'Software',
   'Hardware',
   'Infrastructure',
-  'Other Operating Expense',
-  'Other Operating Expense(OOE)',
+  'Other Operating Expense (OOE)', 'Other Operating Expense', 'OOE',
 ];
+const CATEGORY_DISPLAY = {
+  'Labor/ T&M':                  'Labor/T&M',
+  'Labor/T&M':                   'Labor/T&M',
+  'MS':                          'Managed Service (MS)',
+  'Managed Service':             'Managed Service (MS)',
+  'Managed Service (MS)':         'Managed Service (MS)',
+  'FPC':                         'Fixed Price Contract (FPC)',
+  'Fixed Price Contract':        'Fixed Price Contract (FPC)',
+  'Fixed Price Contract (FPC)':   'Fixed Price Contract (FPC)',
+  'OOE':                         'Other Operating Expense (OOE)',
+  'Other Operating Expense':     'Other Operating Expense (OOE)',
+  'Other Operating Expense (OOE)':'Other Operating Expense (OOE)',
+};
+function catDisplay(c) { return CATEGORY_DISPLAY[c] || c; }
+window._catDisplay = CATEGORY_DISPLAY;
 function sortCategories(cats) {
   if (!cats) return cats;
-  return [...cats].sort((a, b) => {
-    const ai = CATEGORY_ORDER.findIndex(o => a && a.toLowerCase().startsWith(o.toLowerCase()));
-    const bi = CATEGORY_ORDER.findIndex(o => b && b.toLowerCase().startsWith(o.toLowerCase()));
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
+  const idx = c => {
+    const cl = (c||'').toLowerCase();
+    const i = CATEGORY_ORDER.findIndex(o => cl === o.toLowerCase());
+    return i === -1 ? 999 : i;
+  };
+  return [...cats].sort((a, b) => idx(a) - idx(b) || a.localeCompare(b));
 }
 
 function FilterBar({ filters, setFilters, lookups }) {
@@ -132,7 +143,7 @@ function FilterBar({ filters, setFilters, lookups }) {
         <span className="fb-lbl">domain</span>
         <MultiSelect label="Domain" options={lookups.domains} selected={filters.domains} onChange={(v)=>update('domains', v)} allLabel="All" />
         <span className="fb-lbl">category</span>
-        <MultiSelect label="Category" options={sortCategories(lookups.categories)} selected={filters.categories} onChange={(v)=>update('categories', v)} allLabel="All" />
+        <MultiSelect label="Category" options={sortCategories(lookups.categories)} selected={filters.categories} onChange={(v)=>update('categories', v)} allLabel="All" displayFn={catDisplay} />
         <span className="fb-lbl">onestream cat.</span>
         <MultiSelect label="OneStream Category" options={lookups.onestreamCategories || []} selected={filters.onestreamCategories} onChange={(v)=>update('onestreamCategories', v)} allLabel="All" />
         <span className="fb-lbl">sub-category1</span>

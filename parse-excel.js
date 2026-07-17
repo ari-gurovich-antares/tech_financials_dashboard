@@ -800,8 +800,8 @@
       const b = byV[k];
       b.budget += li.budget; b.actual += li.actual; b.forecast += li.forecast;
       b.risk += li.risk; b.opp += li.opp; b.net += li.net;
-      if (li.domain) b.domains.add(li.domain);
-      if (li.owner) b.domainOwners.add(li.owner);
+      if (li.domain && !/amort/i.test(li.domain)) b.domains.add(li.domain);
+      if (li.owner && !/amort/i.test(li.owner)) b.domainOwners.add(li.owner);
       li.monthlyAC.forEach((v,i)=>{ b.monthlyAC[i]+=v; });
       li.monthlyFC.forEach((v,i)=>{ b.monthlyFC[i]+=v; });
       b.lineItems.push(li);
@@ -830,7 +830,7 @@
       o.budget += li.budget; o.actual += li.actual; o.forecast += li.forecast;
       o.risk += li.risk; o.opp += li.opp; o.net += li.net;
       if (li.vendor) o.vendors.add(li.vendor);
-      if (li.domain) o.domains.add(li.domain);
+      if (li.domain && !/amort/i.test(li.domain)) o.domains.add(li.domain);
     }
     const domainOwners = Object.values(byO).map(o => ({
       ...o, vendors: [...o.vendors], domains: [...o.domains]
@@ -843,12 +843,12 @@
 
     // Lookups for filter bar
     const lookups = {
-      domains: uniq(lineItems.map(x => x.domain)),
+      domains: uniq(lineItems.map(x => x.domain).filter(d => d && !/amort/i.test(d))),
       categories: uniq(lineItems.map(x => x.category)),
       subCategories: uniq(lineItems.map(x => x.subCategory)),
       onestreamCategories: uniq(lineItems.map(x => x.onestreamCategory)),
       vendors: uniq(lineItems.map(x => x.vendor)),
-      owners: uniq(lineItems.map(x => x.owner)),
+      owners: uniq(lineItems.map(x => x.owner).filter(o => o && !/amort/i.test(o))),
     };
 
     return {
