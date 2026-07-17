@@ -112,6 +112,7 @@ function App({ data: initialData }) {
   const lastRefreshed = data._parsedAt ? new Date(data._parsedAt) : new Date();
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const Tab57Component = window.Tab57 || null;
 
   // Fixed enterprise-level filters — full year, all domains, all categories
   const filters = {
@@ -308,7 +309,7 @@ function App({ data: initialData }) {
         <div className="content"><VendorsTab key={uploadKey} data={ctx} view={filters.view} /></div>
       )}
       {activeTab === '57' && (
-        <div className="content"><Tab57 key={uploadKey} data={ctx} /></div>
+        <div className="content">{Tab57Component ? <Tab57Component key={uploadKey} data={ctx} /> : <div className="card" style={{ padding:24, color:'#B23A3A' }}>5+7 Tracking tab failed to load. Please refresh after the latest files deploy.</div>}</div>
       )}
 
       {uploadOpen && (

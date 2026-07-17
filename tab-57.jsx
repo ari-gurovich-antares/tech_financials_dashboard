@@ -456,3 +456,5 @@ return (
     </div>
   );
 }
+
+window.Tab57 = Tab57;
